@@ -14,8 +14,21 @@ test("cloud-only PostgreSQL migration, live verification and private historical 
       create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text references storage.buckets(id),name text);
       alter table storage.objects enable row level security; grant select,insert,update,delete on storage.objects to authenticated,anon;
       create function storage.foldername(name text) returns text[] language sql immutable as $$ select (string_to_array(name,'/'))[1:array_length(string_to_array(name,'/'),1)-1] $$;`);
-    for (const file of readdirSync(join(__dirname,"../supabase/migrations")).filter(f => f.endsWith(".sql")).sort()) await db.exec(readFileSync(join(__dirname,"../supabase/migrations",file),"utf8"));
-    for (const file of ["company_isolation.sql","employee_invitations.sql","product_management_permission.sql","cloud_only_workspace.sql"]) {
+    const existingUser="70000000-0000-4000-a000-000000000001",existingCompany="70000000-0000-4000-a000-000000000010";
+    for (const file of readdirSync(join(__dirname,"../supabase/migrations")).filter(f => f.endsWith(".sql")).sort()) {
+      if (file === "202610040005_quotation_lifecycle.sql") await db.exec(`
+        insert into auth.users(id,email) values('${existingUser}','existing@example.test');
+        insert into public.companies(id,name) values('${existingCompany}','Original brand');
+        insert into public.quotations(company_id,created_by,number,quote_date,customer_name,notes,source_key)
+        values('${existingCompany}','${existingUser}','EXISTING',current_date,'Original customer','Original note','legacy-source');`);
+      await db.exec(readFileSync(join(__dirname,"../supabase/migrations",file),"utf8"));
+    }
+    const migrated=(await db.query(`select * from public.quotations where company_id='${existingCompany}'`)).rows[0];
+    assert.equal(migrated.status,"pending");assert.equal(migrated.creator_email,"existing@example.test");assert.equal(migrated.deleted_at,null);
+    assert.equal(migrated.customer_name,"Original customer");assert.equal(migrated.notes,"Original note");assert.equal(migrated.source_key,"legacy-source");assert.equal(migrated.company_snapshot.name,"Original brand");
+    // Remove only the synthetic compatibility seed in this local database.
+    await db.exec(`delete from public.quotations where company_id='${existingCompany}';delete from public.companies where id='${existingCompany}';delete from auth.users where id='${existingUser}';`);
+    for (const file of ["company_isolation.sql","employee_invitations.sql","product_management_permission.sql","cloud_only_workspace.sql","quotation_lifecycle.sql"]) {
       await db.exec(readFileSync(join(__dirname,"../supabase/tests",file),"utf8"));
       for (const table of ["auth.users","public.companies","public.company_members","public.company_invitations","public.products","public.quotations","storage.objects"]) assert.equal((await db.query(`select * from ${table}`)).rows.length,0,`${file} rolled back ${table}`);
     }
@@ -47,5 +60,15 @@ test("cloud-only PostgreSQL migration, live verification and private historical 
     await db.exec(`update public.company_members set active=false where user_id='${admin}'`);
     await assert.rejects(as(admin,upload),/row-level security/);
     assert.equal((await as(admin,"select * from storage.objects")).rows.length,0);
+    // Physical expiry is tested ONLY in this isolated database. Never purge live
+    // project trash while running the rollback-only SQL Editor verification.
+    await db.exec(`insert into public.quotations(company_id,created_by,number,quote_date,deleted_at) values
+      ('${co}','${sales}','EXPIRED',current_date,now()-interval '15 days'),
+      ('${co}','${sales}','RECOVERABLE',current_date,now()-interval '14 days');`);
+    const imagesBefore=(await db.query("select * from storage.objects order by name")).rows;
+    assert.equal((await db.query("select public.purge_expired_quotations() as removed")).rows[0].removed,1);
+    assert.equal((await db.query("select count(*)::integer as count from public.quotations")).rows[0].count,2,"live/recoverable quotes survive");
+    assert.deepEqual((await db.query("select * from storage.objects order by name")).rows,imagesBefore,"worker never deletes images");
+    assert.equal((await db.query("select public.purge_expired_quotations() as removed")).rows[0].removed,0,"worker is idempotent");
   } finally { await db.close(); }
 });

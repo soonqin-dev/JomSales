@@ -8,7 +8,7 @@ import { canShareFile, downloadFile } from "./share";
 const signature = (items, details, company, edits = {}) => JSON.stringify({ items, details,
   company: { name: company.name, contact: company.contact, logo_path: company.logo_path }, edits });
 
-export default function Quotation({ quotation, context, onBack }) {
+export default function Quotation({ quotation, context, onBack, onComplete }) {
   const { items = [], setItems, details, setDetails, company, ready, error } = quotation;
   const [edits, setEdits] = useState({});
   const [generating, setGenerating] = useState(false);
@@ -36,7 +36,7 @@ export default function Quotation({ quotation, context, onBack }) {
     setMessage("");
     if (!/^\d+$/.test(draft.quantity) || Number(draft.quantity) < 1 ||
         Number(draft.quantity) > MAX_QUANTITY || moneyToCents(draft.unitPrice) === null ||
-        Number(draft.unitPrice) > MAX_UNIT_PRICE) return;
+        Number(draft.unitPrice) > MAX_UNIT_PRICE) { quotation.markDirty(); return; }
     const next = { ...item, quantity: Number(draft.quantity), unitPrice: Number(draft.unitPrice) };
     next.lineTotal = lineCents(next) / 100;
     setItems(prev => prev.map(line => line.product.id === item.product.id ? next : line));
@@ -62,12 +62,7 @@ export default function Quotation({ quotation, context, onBack }) {
     setEdits({}); setPdf(null); setMessage("");
   }
 
-  async function saveDraft() {
-    try { await quotation.save(); setEdits({}); setPdf(null); setMessage(""); }
-    catch (err) { setMessage(err.message); }
-  }
-
-  async function generatePdf(event) {
+  async function generatePdf(event, prepareShare = false) {
     event.preventDefault();
     if (locked || !items.length || invalidRows || totals.total === null) return;
     if (!details.customerName.trim() || !company.name.trim() || !details.date || !details.number.trim()) {
@@ -84,7 +79,8 @@ export default function Quotation({ quotation, context, onBack }) {
       const file = await createQuotationPdf(saved);
       setEdits({});
       setPdf({ file, fingerprint: signature(saved.items, saved.details, saved.company) });
-      setMessage("报价已保存到云端，PDF 已生成，可以下载或分享给客户。");
+      if (prepareShare) setMessage("报价已自动保存，PDF 已准备好。请点击分享；取消分享不会清空当前报价。");
+      else { downloadFile(file); onComplete(file, saved.row.id); }
     } catch (err) {
       setMessage(err.message || "PDF 生成失败，请重试。");
     } finally {
@@ -103,9 +99,9 @@ export default function Quotation({ quotation, context, onBack }) {
     try {
       // The file is prepared beforehand so this call retains the tap's user activation.
       await navigator.share({ files: [currentPdf], title: `Quotation ${details.number}` });
-      setMessage("已完成分享操作。");
+      onComplete(currentPdf, quotation.row.id);
     } catch (err) {
-      if (err.name !== "AbortError") setMessage("未能分享 PDF。请下载文件后在 WhatsApp 中发送。");
+      setMessage(err.name === "AbortError" ? "分享已取消，当前报价保留，可重试分享或继续编辑。" : "未能分享 PDF，当前报价保留。请下载文件后在 WhatsApp 中发送。");
     } finally {
       setSharing(false);
     }
@@ -124,15 +120,15 @@ export default function Quotation({ quotation, context, onBack }) {
       <header className="quotationHeading">
         <div className="eyebrow">SALESGO · QUOTATION</div>
         <h1>报价清单</h1>
+        <p className="activeQuotation">{quotation.row.revision ? `正在编辑：${details.number}` : "新报价"}</p>
         <p>编辑产品，填写客户资料，生成报价 PDF。</p>
       </header>
       {error && <p className="quotationError" role="alert">{error}</p>}
-      <p role="status">{quotation.dirty ? "有未保存修改（仅在当前页面内存）。请保存后再离开。" : quotation.message || "报价从公司云端读取。"}</p>
+      <p role="status">{quotation.dirty ? "有未保存修改（仅在当前页面内存）。生成／分享时自动保存。" : quotation.message || "生成／分享时自动保存到公司云端。"}</p>
       {company.logoError && <p className="quotationError" role="alert">{company.logoError}</p>}
-      <button type="button" disabled={locked || invalidRows || totals.total === null} onClick={saveDraft}>保存到云端</button>
       <Link href={`/quotations?company=${context.companyId}`}>已保存报价</Link>
 
-      <form onSubmit={generatePdf}>
+      <form onSubmit={event => generatePdf(event)}>
         <fieldset className="quotationFields" disabled={locked}>
           <section className="quotationSection" aria-labelledby="quotationItemsTitle">
             <h2 id="quotationItemsTitle">产品 <span>{items.length} 项</span></h2>
@@ -216,9 +212,12 @@ export default function Quotation({ quotation, context, onBack }) {
           disabled={locked || !items.length || invalidRows || totals.total === null || !!company.logoError}>
           {generating ? "正在生成 PDF…" : "生成报价 PDF"}
         </button>
+        <button type="button" className="whatsappButton"
+          disabled={locked || !items.length || invalidRows || totals.total === null || !!company.logoError}
+          onClick={event => generatePdf(event, true)}>准备分享 PDF（自动保存）</button>
       </form>
       {currentPdf && <div className="pdfActions">
-        <button type="button" className="cancelButton" disabled={sharing} onClick={() => downloadFile(currentPdf)}>下载 PDF</button>
+        <button type="button" className="cancelButton" disabled={locked} onClick={() => { downloadFile(currentPdf); onComplete(currentPdf, quotation.row.id); }}>下载 PDF</button>
         <button type="button" className="whatsappButton" disabled={sharing} onClick={sharePdf}>
           {sharing ? "正在打开分享…" : "分享 PDF"}
         </button>

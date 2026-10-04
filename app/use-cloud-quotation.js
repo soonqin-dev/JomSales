@@ -12,7 +12,6 @@ export default function useCloudQuotation(context) {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const current = useRef(null), liveBrand = useRef(null), generation = useRef(0), working = useRef(false);
-  const requested = useRef(false);
   function replace(value) { current.current = value; setDraft(value); }
 
   async function reload() {
@@ -22,11 +21,15 @@ export default function useCloudQuotation(context) {
     setLoading(true); setError("");
     try {
       const client = createClient();
-      const params = new URLSearchParams(window.location.search), id = params.get("quote");
-      const [company, saved] = await Promise.all([readBrand(client, context.companyId), params.has("new") ? Promise.resolve(null) : readQuotation(client, context, id)]);
+      const params = new URLSearchParams(window.location.search);
+      const id = current.current?.row.revision ? current.current.row.id : params.get("quote");
+      const [company, saved] = await Promise.all([readBrand(client, context.companyId), readQuotation(client, context, id)]);
       if (version !== generation.current) return;
-      requested.current = !!id; liveBrand.current = company; setBrand(company); replace(saved || newDraft(company));
-    } catch (err) { if (version === generation.current) { replace(null); setError(`云端报价／公司资料读取失败：${err.message}。请确认已执行全云端 SQL。`); } }
+      liveBrand.current = company; setBrand(company); replace(saved || newDraft(company));
+      // Selection is a one-time handoff. Re-entering/reloading starts a new quote.
+      const url = new URL(window.location.href); url.searchParams.delete("quote"); url.searchParams.delete("new");
+      window.history.replaceState(null, "", url.pathname + url.search);
+    } catch (err) { if (version === generation.current) { setError(`云端报价／公司资料读取失败：${err.message}。请确认已执行最新报价 SQL。当前草稿未清空。`); } }
     finally { if (version === generation.current) setLoading(false); }
   }
 
@@ -68,12 +71,6 @@ export default function useCloudQuotation(context) {
       const result = await saveQuotation(createClient(), context, value);
       if (version !== generation.current) throw new Error("账号或公司已改变，请在原公司核对保存结果。");
       replace(result); setMessage("已保存到公司云端，可在其他设备重新打开。");
-      const url = new URL(window.location.href);
-      if (url.searchParams.has("new")) {
-        // Once saved, refresh/reopen must load this quote, not another blank draft.
-        url.searchParams.delete("new"); url.searchParams.set("quote", result.row.id);
-        window.history.replaceState(null, "", url.pathname + url.search);
-      }
       return result;
     } catch (err) {
       if (version === generation.current) { replace({ ...value, dirty: true }); setError(`保存失败：${err.message}`); setMessage("保存未确认，修改仅暂存在当前页面内存。请勿离开，并核对后重试。"); }
@@ -81,27 +78,33 @@ export default function useCloudQuotation(context) {
     } finally { working.current = false; setBusy(false); }
   }
 
-  async function add(product) {
+  function add(product) {
     const value = current.current;
     if (!value || working.current) return;
     const existing = value.items.find(line => line.product.id === product.id);
     if (existing?.quantity >= MAX_QUANTITY || (!existing && value.items.length >= 200)) { setError("报价数量或产品行数已达到上限。"); return; }
     const items = existing ? value.items.map(line => line.product.id === product.id ? { ...line, quantity: line.quantity + 1, lineTotal: (line.quantity + 1) * line.unitPrice } : line)
       : [...value.items, { product: { id: product.id, serial: product.serial, name: product.name }, quantity: 1, unitPrice: Number(product.price), lineTotal: Number(product.price) }];
-    try { return await save({ ...value, items, dirty: true }); } catch { /* Visible controller error; never a localStorage fallback. */ }
+    edit(prev => ({ ...prev, items })); return true;
   }
 
   function startNew() {
     if (!current.current || working.current) return false;
-    if (!window.confirm("新建报价会清空当前页面的产品和客户资料；已保存的报价会保留在云端。未保存修改将被放弃，继续吗？")) return false;
-    replace(newDraft(liveBrand.current)); setError(""); setMessage("已开始新报价，加入产品或点击保存后写入云端。");
-    const url = new URL(window.location.href); url.searchParams.delete("quote"); url.searchParams.set("new", "1");
-    window.history.replaceState(null, "", url.pathname + url.search);
-    requested.current = false;
-    return true;
+    if (current.current.dirty && !window.confirm("未保存修改将被放弃，已保存报价会保留。开始新报价吗？")) return false;
+    reset(); return true;
   }
-  return { ...draft, brand, loading, busy, error, message, requested: requested.current,
-    ready: !loading && !!draft, save, add, startNew, reload,
+  function reset() {
+    replace(newDraft(liveBrand.current)); setError(""); setMessage("新报价：生成／分享时自动保存到公司云端。");
+    const url = new URL(window.location.href); url.searchParams.delete("quote"); url.searchParams.delete("new");
+    window.history.replaceState(null, "", url.pathname + url.search);
+  }
+  function complete(id) {
+    if (working.current || current.current?.dirty || current.current?.row.id !== id) return false;
+    reset(); return true;
+  }
+  return { ...draft, brand, loading, busy, error, message,
+    ready: !loading && !!draft, save, add, startNew, reload, complete,
+    markDirty: () => edit(prev => prev),
     setItems: value => edit(prev => ({ ...prev, items: typeof value === "function" ? value(prev.items) : value })),
     setDetails: value => edit(prev => ({ ...prev, details: typeof value === "function" ? value(prev.details) : value })) };
 }

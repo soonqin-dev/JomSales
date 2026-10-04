@@ -30,7 +30,7 @@ function createFixture(port=54329) {
     const own=members.filter(m=>m.user_id===user?.id&&m.active),member=co=>own.find(m=>m.company_id===co);
     const writer=co=>member(co)?.role==="admin"||member(co)?.can_manage_products===true;
     const eq=k=>url.searchParams.get(k)?.replace(/^eq\./,"");
-    const match=row=>[...url.searchParams].every(([key,v])=>!v.startsWith("eq.")||String(row[key])===v.slice(3));
+    const match=row=>[...url.searchParams].every(([key,v])=>v==="is.null"?row[key]==null:v==="not.is.null"?row[key]!=null:!v.startsWith("eq.")||String(row[key])===v.slice(3));
     let data={},status=200;requests.push({path,method,user:user?.id});
     try {
       if(path==="/auth/v1/token") {
@@ -49,14 +49,28 @@ function createFixture(port=54329) {
         } else if(method==="PATCH")data=matching.filter(p=>writer(p.company_id)).map(p=>Object.assign(p,body,{revision:p.revision+1}));
         else data=matching;
       } else if(path==="/rest/v1/quotations") {
-        let matching=quotations.filter(q=>member(q.company_id)&&(member(q.company_id).role==="admin"||q.created_by===user.id)&&match(q));
+        let matching=quotations.filter(q=>member(q.company_id)&&(member(q.company_id).role==="admin"||q.created_by===user.id)&&(!q.deleted_at||Date.parse(q.deleted_at)>Date.now()-15*86400000)&&match(q));
         if(method!=="GET"&&state.failQuote){state.failQuote=false;throw Error("Simulated quote save failure");}
         if(method==="POST") {
           if(!member(body.company_id))throw Error("Permission denied");
           if(quotations.some(q=>q.id===body.id||(body.source_key&&q.source_key===body.source_key&&q.company_id===body.company_id&&q.created_by===user.id)))throw Error("Duplicate quote");
-          const co=companies.find(c=>c.id===body.company_id),row={...body,created_by:user.id,company_snapshot:{name:co.name,contact:co.contact,logo_path:co.logo_path},revision:1,updated_at:new Date().toISOString(),created_at:new Date().toISOString()};quotations.unshift(row);data=[row];
-        }else if(method==="PATCH")data=matching.map(q=>Object.assign(q,body,{revision:q.revision+1,updated_at:new Date().toISOString()}));
+          const co=companies.find(c=>c.id===body.company_id),row={...body,created_by:user.id,creator_email:user.email,status:"pending",deleted_at:null,company_snapshot:{name:co.name,contact:co.contact,logo_path:co.logo_path},revision:1,updated_at:new Date().toISOString(),created_at:new Date().toISOString()};quotations.unshift(row);data=[row];
+        }else if(method==="PATCH")data=matching.filter(q=>!q.deleted_at).map(q=>Object.assign(q,body,{revision:q.revision+1,updated_at:new Date().toISOString()}));
         else data=matching.sort((a,b)=>b.updated_at.localeCompare(a.updated_at));
+      } else if(path==="/rest/v1/rpc/manage_quotation") {
+        const q=quotations.find(q=>q.id===body.target_quote&&q.company_id===body.target_company),m=member(body.target_company);
+        if(!q||!m||(m.role!=="admin"&&q.created_by!==user.id))throw Error("Quotation access denied");
+        if(q.revision!==body.expected_revision)throw Error("Quotation changed. Refresh before retrying.");
+        if(body.action==="restore") {
+          if(!q.deleted_at||Date.parse(q.deleted_at)<=Date.now()-15*86400000)throw Error("Quotation is not recoverable");
+          q.deleted_at=null;
+        } else {
+          if(q.deleted_at)throw Error("Restore quotation before editing");
+          if(body.action==="trash")q.deleted_at=new Date().toISOString();
+          else if(["pending","success"].includes(body.action))q.status=body.action;
+          else throw Error("Invalid quotation action");
+        }
+        data=Object.assign(q,{revision:q.revision+1,updated_at:new Date().toISOString()});
       } else if(path==="/rest/v1/rpc/save_company_brand") {
         if(state.failBrand){state.failBrand=false;throw Error("Simulated brand save failure");}
         const co=companies.find(c=>c.id===body.target_company);

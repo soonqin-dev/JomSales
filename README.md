@@ -35,7 +35,7 @@ rather than creating another company.
 | `/auth/callback` | Finish email confirmation | Public callback |
 | `/join` | Email-bound employee invitation | Public entry, authenticated acceptance |
 | `/cloud` | Products, share cards, product CRUD, quotation editor | Active company member |
-| `/quotations` | Reopen saved quotes, start new quote | Sales: own; admin: company-wide |
+| `/quotations` | Select/search quotes, status, trash/restore | Sales: own; admin: company-wide |
 | `/brand` | Company name, contact, Logo | Company admin |
 | `/team` | Invitations, disable/restore, grouped product permission | Company admin |
 
@@ -47,23 +47,33 @@ authentication state, not business-data storage.
 
 ## Rollout for the current installation
 
-All five migrations and cloud-only verification have already been applied for
-the current installation. Do NOT rerun them. Removing the legacy browser-import
-feature requires NO new SQL: push the tested commit via GitHub Desktop, verify
-Vercel Production Ready matches it, then test the cloud workflows on real phones.
+The first FIVE migrations have already been applied. Do NOT rerun them.
+For this quotation workflow update, before pushing/deploying:
 
-The new migration preserves users/products/memberships/permissions, adding quotes,
-company branding and a private 1MB Logo bucket. It does not delete physical files
-or browser originals. Verification SQL creates synthetic Auth/company records,
-rolls them ALL back, sends no email and does not touch physical Storage files.
-For a NEW installation only, run all migration files in chronological order once.
+1. Run `supabase/migrations/202610040005_quotation_lifecycle.sql` ONCE in Supabase
+   SQL Editor as postgres. Existing quotes default to Pending; none are deleted.
+2. Run `supabase/tests/quotation_lifecycle.sql`. All synthetic records roll back;
+   no real quotation is purged, no email/physical Storage files are touched.
+3. Run `supabase/operations/quotation_retention.sql` as postgres. It enables
+   pg_cron and schedules ONLY trashed quotation rows at least 15 days old for
+   permanent deletion, hourly. Verify the named job is active. Monitor its History
+   in Supabase Cron. If installation fails, do not claim automatic cleanup works;
+   expired trash cannot be restored but physical deletion awaits this job.
+4. Push via GitHub Desktop, verify Vercel Production Ready matches the commit,
+   then test on real phones. No new environment variable/service key is needed.
+
+Retention excludes live quotes, company records, products, images and brand files.
+Downloaded/shared PDFs cannot be recalled. Purged quotations cannot be restored
+from the app. For a NEW installation run all SIX migrations in order, then install
+the retention job. No local or mocked test activates production Cron.
 
 ## Products, images and permissions
 
 All active members can read/search/share. Admins manage products; sales can manage
 only with the admin-controlled grouped **新增、编辑、删除** flag. It never grants
 admin/team/brand access. Stopping membership overrides every permission without
-deleting company records. The UI rechecks membership on refresh/focus and every
+deleting company records. Sales without this flag do not see product CRUD buttons.
+The UI rechecks membership on refresh/focus and every
 two minutes; RLS checks every request even before the UI updates.
 
 Products have immutable ownership/import metadata, optimistic revisions and soft
@@ -80,23 +90,37 @@ new links; already issued URLs work until expiry. Downloads/shares cannot be rec
 
 ## Cloud quotations and company brand
 
-Adding a product saves the quotation immediately. Quantity, price, customer
-name/phone, date, notes and fixed-amount discount edits require **保存到云端**.
-Dirty/failure messages and navigation warnings distinguish confirmed cloud saves
-from unsaved page memory. Closing/leaving without saving discards edits; network
-failure never silently falls back to LocalStorage. Sales read/edit their own quotes;
-admin reads/edits all company quotes. Admin edits retain the original creator.
+Normal entry/reload starts a blank **新报价**, never the last saved quote. Adding
+products and editing quantity/price/customer/date/notes/discount use page memory
+only, until generation/sharing automatically confirms the cloud save. No manual
+save button exists. Dirty/failure messages and navigation warnings protect drafts;
+failed saves retain all current contents and never fall back to LocalStorage.
 
-The latest own saved quote opens by default. **新建报价** clears the editor after
-confirmation but keeps old cloud records. **已保存报价** reopens a quote on another
-device. Customer data is stored with a quote, not in a standalone CRM. There are
-no quotation delete/archive/status controls, orders or billing in this release.
+**生成报价 PDF** autosaves, generates and starts the download, then returns to an
+empty catalog cart. The last generated file remains downloadable/shareable from
+the catalog. A failed PDF render retains the saved quote in the editor for retry.
+**准备分享 PDF（自动保存）** saves/prepares first; tap **分享 PDF** afterwards to
+retain mobile user activation. Successful native share resets to a new catalog
+quote; cancellation/failure leaves the current quote/PDF intact. Unsupported
+browsers can download and attach the file manually. A browser download start or
+share completion is not proof of customer receipt or acceptance.
 
-The catalog also offers **新建报价单** beside its quotation cart, for both admins
-and sales (independent of product CRUD permission). It confirms before replacing
-the current editor, then opens a blank quotation with a new number/date. It does
-not delete/overwrite any saved quote. After the new quote is saved, its URL points
-to that saved record so a refresh does not accidentally start another blank quote.
+In **已保存报价**, search by number/customer/employee email, filter Pending/Success,
+then **选择报价** returns straight to the catalog with its cart loaded and
+**正在编辑：编号** displayed. Generation/sharing updates the SAME saved id.
+Selection is a one-time URL handoff; reload starts new again. **新建报价单** resets
+the catalog cart after confirmation if dirty; it never deletes saved records.
+Sales manage only their own quotes; admins manage all company quotes and see the
+server-stamped creator email. Admin edits preserve ownership, email and status.
+
+**Pending** means awaiting customer acceptance, **Success** means customer
+accepted (NOT payment received). Change status manually in history; exports never
+auto-mark Success. **删除报价** moves it to the recycle bin after confirmation.
+Restore within 15 days keeps the original number, snapshots, status and owner.
+Expired rows are unreadable/unrecoverable; the hourly job physically purges them.
+Status/trash/restore use a locked, revision-checked, company/owner-scoped RPC;
+browser callers cannot write lifecycle/creator fields or permanently delete rows.
+Customer data remains part of a quote, not a standalone CRM. No orders/billing yet.
 
 The first cloud save captures product name/code/quantity/price snapshots and
 server-stamped company name/contact/Logo-path. Later product removal or branding
@@ -104,7 +128,7 @@ changes never rewrite historical quotes. Logos referenced by a company or histor
 cannot be deleted by app cleanup. Only an admin changes current company branding.
 
 Integer-cent calculations and limits are checked in client and DB. Invalid input
-cannot save/export. Customer name is required for PDF export, optional in a draft.
+cannot save/export. Customer name is required for PDF export.
 **生成报价 PDF** confirms a cloud save first, then generates A4 pages with brand,
 customer, rows, totals, notes and page numbers. Edits invalidate the prepared PDF.
 PDFs use browser-font canvases (Chinese supported, text not selectable). Product
@@ -119,7 +143,8 @@ The legacy browser-import page, navigation and readers have been removed. Old
 workspace (anonymous users must log in); they cannot preview/import browser data.
 Application code does not read/write/clear LocalStorage business records.
 Previously uploaded products, quotations and original import metadata stay intact
-in Supabase; no SQL, cloud records or physical files are removed by this change.
+in Supabase; removing the legacy import feature itself deletes no cloud records
+or physical files. The separate quotation retention policy above applies to trash.
 Any old browser originals are left untouched, unused by SalesGo. A person with
 access to that browser profile could still inspect them outside the app.
 
@@ -134,7 +159,8 @@ npm run check:supabase
 Unit/service tests cover upload fallback, pagination, lost responses, stale saves
 and absence of local business-data readers/writers. PGlite runs the actual migrations and verification SQL
 with Auth/Storage schema stubs, including company isolation, own/admin quotations,
-disabled/anonymous access and historical Logo retention.
+disabled/anonymous access, lifecycle RPC revisions, 15-day expiry/purge and
+historical Logo retention. Physical purge is tested ONLY in the isolated DB.
 
 Optional browser regression: install Playwright separately or set
 `SALESGO_PLAYWRIGHT_MODULE` to an existing module, then run:
@@ -147,8 +173,10 @@ npm run build
 It starts a local API double on 54329, builds with test-only env values and runs
 an isolated production server on 54330. BOTH SSR/proxy and browser Auth call the
 double; no live Supabase writes occur. It covers login guards, cross-device quotes,
-JPG/PDF exports with private Logo, failed/stale save retention, company/role access,
-retired-route redirects, ignored browser data and permission removal. Afterwards `.next` still holds
+JPG/PDF autosave/reset, selected-quote edits, failed/stale/PDF save retention,
+share cancellation/success, employee identity, lifecycle controls, company/role
+access, retired-route redirects, ignored browser data and hidden CRUD controls.
+Afterwards `.next` still holds
 test env values: rerun normal `npm run build` before local production use. The
 old `test-cloud-browser.cjs` and `test-team-browser.cjs` harnesses are historical
 pre-SSR tests, superseded by this harness. Live migration, Vercel and physical

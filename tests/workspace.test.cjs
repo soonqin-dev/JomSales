@@ -6,14 +6,14 @@ const { join } = require("node:path");
 const crypto = require("node:crypto").webcrypto;
 const source = file => readFileSync(join(__dirname,"..",file),"utf8").replace(/^import .*;\r?\n/gm,"").replace(/export /g,"");
 const context = vm.createContext({ crypto, TextEncoder, fetch, Blob, Set });
-vm.runInContext(source("app/quotation-utils.js")+"\n"+source("lib/supabase/workspace.js")+"\nglobalThis.api={quotePayload,saveQuotation,readQuotation,listQuotations,saveBrand,signedBrand,newDraft};", context);
+vm.runInContext(source("app/quotation-utils.js")+"\n"+source("lib/supabase/workspace.js")+"\nglobalThis.api={quotePayload,saveQuotation,readQuotation,listQuotations,manageQuotation,saveBrand,signedBrand,newDraft};", context);
 const api = context.api;
 const scope = {companyId:"40000000-0000-4000-a000-000000000010",userId:"40000000-0000-4000-a000-000000000001"};
 const brand={id:scope.companyId,name:"Company A",contact:"Phone",logo_path:null,logo:"",brand_revision:1};
 const draft=()=>({...api.newDraft(brand),items:[{product:{id:"P1",serial:"S1",name:"Frozen"},quantity:2,unitPrice:12.5}],details:{number:"Q1",date:"2026-10-04",customerName:"Client",phone:"123",notes:"",discount:"5"}});
 function mock({ lost=false,conflict=false,signError=false,brandError=false }={}) {
   const rows=[],ranges=[],removed=[],uploads=[];
-  const client={from(){let payload,op="select",filters={}; const q={select:()=>q,eq:(k,v)=>{filters[k]=v;return q;},order:()=>q,limit:()=>q,
+  const client={from(){let payload,op="select",filters={}; const q={select:()=>q,is:()=>q,not:()=>q,eq:(k,v)=>{filters[k]=v;return q;},order:()=>q,limit:()=>q,
     insert:p=>{payload=p;op="insert";return q;},update:p=>{payload=p;op="update";return q;},
     range:async(a,b)=>{ranges.push([a,b]);return {data:rows.slice(a,b+1)};},
     maybeSingle:async()=>{let row=rows.find(r=>Object.entries(filters).every(([k,v])=>r[k]===v));
@@ -39,6 +39,16 @@ test("history pagination continues beyond 500 and signed branding failures are e
   const m=mock({signError:true});m.rows.push(...Array.from({length:1001},(_,id)=>({id})));
   assert.equal((await api.listQuotations(m.client,scope.companyId)).length,1001);assert.equal(m.ranges.length,3);
   const signed=await api.signedBrand(m.client,{...brand,logo_path:"existing"});assert.match(signed.logoError,/无法读取/);assert.equal(signed.logo,"");
+});
+
+test("default entry never reads last quotation; lifecycle RPC preserves scoped revision",async()=>{
+  const forbidden={from(){throw Error("must not fetch latest saved quote");}};
+  assert.equal(await api.readQuotation(forbidden,scope),null);
+  const calls=[],client={rpc:async(name,args)=>{calls.push({name,args});return {data:{id:"q",status:"success",revision:3}};}};
+  const result=await api.manageQuotation(client,scope.companyId,{id:"q",revision:2},"success");
+  assert.equal(result.status,"success");assert.equal(calls[0].args.expected_revision,2);assert.equal(calls[0].args.target_company,scope.companyId);
+  await assert.rejects(api.manageQuotation(client,scope.companyId,{id:"q",revision:2},"purge"),/无效/);
+  await assert.rejects(api.manageQuotation({rpc:async()=>({error:{message:"denied"}})},scope.companyId,{id:"q",revision:2},"trash"),/denied/);
 });
 test("branding preserves broken referenced logos unless explicitly removed, never upserts, cleans failed new uploads",async()=>{
   const m=mock(),previous={...brand,logoError:"broken",logo_path:"existing",logo:""};

@@ -33,6 +33,8 @@ export default function Catalog({ cloud, quotation }) {
   const [cardGenerating, setCardGenerating] = useState(false);
   const [cardAttempt, setCardAttempt] = useState(0);
   const [quotationOpen, setQuotationOpen] = useState(false);
+  const [completedPdf, setCompletedPdf] = useState(null);
+  const [pdfMessage, setPdfMessage] = useState("");
   const detailDialog = useRef(null);
 
   const [serial, setSerial] = useState("");
@@ -41,7 +43,6 @@ export default function Catalog({ cloud, quotation }) {
   const [price, setPrice] = useState("");
   const [image, setImage] = useState("");
 
-  useEffect(() => { if (quotation.requested && quotation.ready) setQuotationOpen(true); }, [quotation.requested, quotation.ready]);
   useEffect(() => {
     if (!cloud.canManage) { resetForm(); setOpen(false); }
   }, [cloud.canManage]);
@@ -115,7 +116,7 @@ export default function Catalog({ cloud, quotation }) {
   function startNewQuotation() {
     if (!quotationReady || quotation.busy || saving || !quotation.startNew()) return;
     setSelectedProduct(null);
-    setQuotationOpen(true);
+    setQuotationOpen(false);
   }
 
   async function addToQuotation(item) {
@@ -125,9 +126,8 @@ export default function Catalog({ cloud, quotation }) {
       return;
     }
 
-    setDetailMessage("正在加入并保存到云端…");
-    const saved = await quotation.add(item);
-    setDetailMessage(saved ? "已加入报价清单，并保存到公司云端。" : "加入结果未确认，请查看报价错误提示，勿重复加入。");
+    const added = quotation.add(item);
+    setDetailMessage(added ? "已加入当前报价，生成／分享时自动保存。" : "未能加入，请查看报价错误提示。");
   }
 
   const filtered = useMemo(() => {
@@ -228,7 +228,8 @@ export default function Catalog({ cloud, quotation }) {
   }
 
   if (quotationOpen && quotationReady) {
-    return <Quotation quotation={quotation} context={cloud.context} onBack={() => setQuotationOpen(false)} />;
+    return <Quotation quotation={quotation} context={cloud.context} onBack={() => setQuotationOpen(false)}
+      onComplete={(file, id) => { if (quotation.complete(id)) { setCompletedPdf(file); setPdfMessage("报价已自动保存，当前已开始新报价。"); setQuotationOpen(false); } }} />;
   }
 
   return (
@@ -246,7 +247,8 @@ export default function Catalog({ cloud, quotation }) {
 
       <div className="notice">
         公司工作区：{cloud.name}。产品、报价、客户资料和公司品牌均保存在公司云端。
-        <p>{quotation.dirty ? "报价有未保存修改，请打开报价清单保存。" : quotation.message}</p>
+        <p className="activeQuotation">{quotation.row?.revision ? `正在编辑：${quotation.details.number}` : "新报价"}</p>
+        <p>{quotation.dirty ? "当前报价有未保存修改；生成／分享时自动保存。" : quotation.message}</p>
         <button onClick={() => void quotation.reload()} disabled={quotation.busy}>重新读取报价与品牌</button>
       </div>
 
@@ -260,6 +262,17 @@ export default function Catalog({ cloud, quotation }) {
           ＋ 新建报价单
         </button>
       </div>
+      {completedPdf && <div className="notice pdfActions">
+        <p role="status">{pdfMessage}</p>
+        <button type="button" onClick={() => downloadFile(completedPdf)}>下载刚生成的 PDF</button>
+        <button type="button" disabled={sharing} onClick={async () => {
+          if (!canShareFile(completedPdf)) { setPdfMessage("此浏览器无法直接分享 PDF，请下载后通过 WhatsApp 文档附件发送。"); return; }
+          setSharing(true);
+          try { await navigator.share({ files: [completedPdf], title: "SalesGo Quotation" }); setPdfMessage("已完成刚生成 PDF 的分享；当前报价清单保持不变。"); }
+          catch (err) { setPdfMessage(err.name === "AbortError" ? "分享已取消，PDF 仍可下载或重试分享。" : "分享未完成，请下载 PDF 后发送。"); }
+          finally { setSharing(false); }
+        }}>分享刚生成的 PDF</button>
+      </div>}
       {quotationError && <p className="quotationError" role="alert">{quotationError}</p>}
       {catalogError && <p className="quotationError" role="alert">{catalogError}</p>}
       {companyError && <p className="quotationError" role="alert">{companyError}</p>}
@@ -280,9 +293,9 @@ export default function Catalog({ cloud, quotation }) {
         )}
       </div>
 
-      <button className="addButton" disabled={saving || !cloud.canWrite} onClick={() => { resetForm(); setOpen(true); }}>
+      {cloud.canManage && <button className="addButton" disabled={saving || !cloud.canWrite} onClick={() => { resetForm(); setOpen(true); }}>
         ＋ 新增产品
-      </button>
+      </button>}
 
       <section className="list">
         {filtered.length === 0 ? (
@@ -328,7 +341,7 @@ export default function Catalog({ cloud, quotation }) {
                   </div>
                 )}
 
-                <div className="cardActions">
+                {cloud.canManage && <div className="cardActions">
                   <button
                     type="button"
                     className="textButton"
@@ -351,7 +364,7 @@ export default function Catalog({ cloud, quotation }) {
                   >
                     删除
                   </button>
-                </div>
+                </div>}
               </div>
             </article>
           ))
