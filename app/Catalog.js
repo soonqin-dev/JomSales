@@ -112,6 +112,12 @@ export default function Catalog({ cloud, quotation }) {
     setQuotationOpen(true);
   }
 
+  function startNewQuotation() {
+    if (!quotationReady || quotation.busy || saving || !quotation.startNew()) return;
+    setSelectedProduct(null);
+    setQuotationOpen(true);
+  }
+
   async function addToQuotation(item) {
     const unitPrice = Number(item.price);
     if (moneyToCents(item.price) === null || unitPrice > MAX_UNIT_PRICE) {
@@ -248,6 +254,10 @@ export default function Catalog({ cloud, quotation }) {
         <button type="button" className="quotationCartButton" disabled={!quotationReady} onClick={viewQuotation}>
           <span>报价清单：<strong>{quotationCount} 件</strong></span>
           <span>查看 / 生成报价 →</span>
+        </button>
+        <button type="button" className="saveButton newQuotationButton"
+          disabled={!quotationReady || quotation.busy || saving} onClick={startNewQuotation}>
+          ＋ 新建报价单
         </button>
       </div>
       {quotationError && <p className="quotationError" role="alert">{quotationError}</p>}

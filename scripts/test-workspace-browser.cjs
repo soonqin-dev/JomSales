@@ -70,6 +70,27 @@ async function build(){await new Promise((resolve,reject)=>{const p=spawn(proces
     assert.equal(JSON.stringify({products:fixture.products,quotations:fixture.quotations,companies:fixture.companies}),cloudBefore);
     await page.goto(base+"/migration?company=https%3A%2F%2Fexample.test");await page.waitForURL(base+"/cloud");
     console.log("PASS retired migration redirects safely, no legacy reads/import and unchanged cloud/original records");
+    await sales.page.goto(base+"/cloud");await sales.page.getByRole("button",{name:"＋ 新建报价单",exact:true}).waitFor();
+    assert(await sales.page.getByRole("button",{name:"＋ 新增产品",exact:true}).isDisabled());
+    await sales.page.waitForFunction(()=>!document.querySelector(".newQuotationButton")?.disabled);
+    for(const width of [320,390,844]) {
+      await sales.page.setViewportSize({width,height:844});
+      assert(await sales.page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),`new-quote controls fit ${width}px`);
+    }
+    await sales.page.setViewportSize({width:390,height:844});
+    const employeeBefore=JSON.stringify(fixture.quotations),oldEmployee=fixture.quotations.find(q=>q.created_by===fixture.users.sales.id);
+    await sales.page.getByRole("button",{name:"＋ 新建报价单",exact:true}).click();await sales.page.getByRole("heading",{name:"报价清单",exact:true}).waitFor();
+    assert.equal(await sales.page.getByLabel("客户名称 *",{exact:true}).inputValue(),"");assert.equal(await sales.page.locator(".quotationItem").count(),0);
+    assert.notEqual(await sales.page.getByLabel("报价编号",{exact:true}).inputValue(),oldEmployee.number);assert.equal(JSON.stringify(fixture.quotations),employeeBefore);
+    await sales.page.getByLabel("客户名称 *",{exact:true}).fill("New employee quote");await sales.page.getByRole("button",{name:"← 返回产品目录",exact:true}).click();
+    sales.page.removeAllListeners("dialog");sales.page.once("dialog",d=>d.dismiss());
+    await sales.page.getByRole("button",{name:"＋ 新建报价单",exact:true}).click();assert(!await sales.page.getByRole("heading",{name:"报价清单",exact:true}).count());
+    await sales.page.getByRole("button",{name:/查看 \/ 生成报价/}).click();assert.equal(await sales.page.getByLabel("客户名称 *",{exact:true}).inputValue(),"New employee quote");
+    sales.page.on("dialog",d=>d.accept());await sales.page.getByRole("button",{name:"保存到云端",exact:true}).click();await sales.page.getByText("已保存到公司云端，可在其他设备重新打开。",{exact:true}).waitFor();
+    const newEmployee=fixture.quotations.find(q=>q.customer_name==="New employee quote");assert(newEmployee);assert.notEqual(newEmployee.id,oldEmployee.id);assert.equal(newEmployee.created_by,fixture.users.sales.id);
+    assert.equal(fixture.quotations.find(q=>q.id===oldEmployee.id).number,oldEmployee.number);assert(!new URL(sales.page.url()).searchParams.has("new"));
+    await sales.page.reload();await sales.page.getByRole("heading",{name:"报价清单",exact:true}).waitFor();assert.equal(await sales.page.getByLabel("客户名称 *",{exact:true}).inputValue(),"New employee quote");
+    console.log("PASS catalog new quotation for read-only sales, responsive layout, cancel protection, preserved history and saved refresh");
     await sales.page.goto(base+"/cloud");fixture.members.find(m=>m.user_id===fixture.users.sales.id).can_manage_products=true;await sales.page.evaluate(()=>window.dispatchEvent(new Event("focus")));
     await sales.page.getByRole("button",{name:"＋ 新增产品",exact:true}).waitFor();await sales.page.waitForFunction(()=>!document.querySelector(".addButton")?.disabled);await sales.page.getByRole("button",{name:"＋ 新增产品",exact:true}).click();
     fixture.members.find(m=>m.user_id===fixture.users.sales.id).can_manage_products=false;await sales.page.evaluate(()=>window.dispatchEvent(new Event("focus")));await sales.page.locator(".overlay").waitFor({state:"detached"});

@@ -67,7 +67,14 @@ export default function useCloudQuotation(context) {
     try {
       const result = await saveQuotation(createClient(), context, value);
       if (version !== generation.current) throw new Error("账号或公司已改变，请在原公司核对保存结果。");
-      replace(result); setMessage("已保存到公司云端，可在其他设备重新打开。"); return result;
+      replace(result); setMessage("已保存到公司云端，可在其他设备重新打开。");
+      const url = new URL(window.location.href);
+      if (url.searchParams.has("new")) {
+        // Once saved, refresh/reopen must load this quote, not another blank draft.
+        url.searchParams.delete("new"); url.searchParams.set("quote", result.row.id);
+        window.history.replaceState(null, "", url.pathname + url.search);
+      }
+      return result;
     } catch (err) {
       if (version === generation.current) { replace({ ...value, dirty: true }); setError(`保存失败：${err.message}`); setMessage("保存未确认，修改仅暂存在当前页面内存。请勿离开，并核对后重试。"); }
       throw err;
@@ -88,7 +95,8 @@ export default function useCloudQuotation(context) {
     if (!current.current || working.current) return false;
     if (!window.confirm("新建报价会清空当前页面的产品和客户资料；已保存的报价会保留在云端。未保存修改将被放弃，继续吗？")) return false;
     replace(newDraft(liveBrand.current)); setError(""); setMessage("已开始新报价，加入产品或点击保存后写入云端。");
-    const url = new URL(window.location.href); url.searchParams.delete("quote"); window.history.replaceState(null, "", url.pathname + url.search);
+    const url = new URL(window.location.href); url.searchParams.delete("quote"); url.searchParams.set("new", "1");
+    window.history.replaceState(null, "", url.pathname + url.search);
     requested.current = false;
     return true;
   }

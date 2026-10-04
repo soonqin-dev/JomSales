@@ -92,6 +92,12 @@ confirmation but keeps old cloud records. **已保存报价** reopens a quote on
 device. Customer data is stored with a quote, not in a standalone CRM. There are
 no quotation delete/archive/status controls, orders or billing in this release.
 
+The catalog also offers **新建报价单** beside its quotation cart, for both admins
+and sales (independent of product CRUD permission). It confirms before replacing
+the current editor, then opens a blank quotation with a new number/date. It does
+not delete/overwrite any saved quote. After the new quote is saved, its URL points
+to that saved record so a refresh does not accidentally start another blank quote.
+
 The first cloud save captures product name/code/quantity/price snapshots and
 server-stamped company name/contact/Logo-path. Later product removal or branding
 changes never rewrite historical quotes. Logos referenced by a company or history

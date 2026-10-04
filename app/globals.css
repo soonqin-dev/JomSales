@@ -424,6 +424,9 @@ form small {
 }
 
 .quotationSummary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
   margin-bottom: 14px;
   font-size: 14px;
   color: var(--muted);
@@ -857,6 +860,17 @@ form small {
   gap: 12px;
   border-bottom: 1px solid var(--border);
   padding: 16px 0;
+}
+
+.quotationSummary .quotationCartButton {
+  flex: 3 1 240px;
+  width: auto;
+}
+
+.newQuotationButton {
+  flex: 1 0 auto;
+  min-height: 52px;
+  padding: 12px 16px;
 }
 
 .teamRow > div { min-width: 0; overflow-wrap: anywhere; flex: 1 1 220px; }
