@@ -3,39 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import Quotation from "./Quotation";
-import { MAX_QUANTITY, MAX_UNIT_PRICE, lineCents, moneyToCents } from "./quotation-utils";
+import { MAX_UNIT_PRICE, moneyToCents } from "./quotation-utils";
 import { canShareFile, downloadFile } from "./share";
 import { prepareUploadImage } from "./images";
 import { createProductCard } from "./product-card";
-import { CATALOG_KEY, QUOTATION_KEY, DETAILS_KEY, DEFAULT_COMPANY,
-  readStoredJson, validCatalog, validQuotation, validDetails } from "./storage";
 
-const samples = [
-  {
-    id: "sample-1",
-    serial: "P-001",
-    name: "Sample Product A",
-    tags: ["Sample", "Category A"],
-    price: "85.00",
-    image: ""
-  },
-  {
-    id: "sample-2",
-    serial: "P-002",
-    name: "Sample Product B",
-    tags: ["Sample", "Category B"],
-    price: "35.00",
-    image: ""
-  }
-];
-
-function makeId() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-}
-
-export default function Catalog({ cloud = null }) {
-  const [localItems, setItems] = useState([]);
-  const items = cloud ? cloud.items : localItems;
+export default function Catalog({ cloud, quotation }) {
+  const items = cloud.items;
   const [saving, setSaving] = useState(false);
   const [editingRecord, setEditingRecord] = useState(null);
   const pendingId = useRef(null);
@@ -46,16 +20,15 @@ export default function Catalog({ cloud = null }) {
   const imageUploadToken = useRef(0);
   const [formError, setFormError] = useState("");
   const [catalogError, setCatalogError] = useState("");
-  const [ready, setReady] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
-  const [quotationItems, setQuotationItems] = useState([]);
-  const [quotationReady, setQuotationReady] = useState(false);
-  const [quotationError, setQuotationError] = useState("");
+  const quotationItems = quotation.items || [];
+  const quotationReady = quotation.ready;
+  const quotationError = quotation.error;
   const [detailMessage, setDetailMessage] = useState("");
   const [sharing, setSharing] = useState(false);
-  const [shareCompany, setShareCompany] = useState(DEFAULT_COMPANY);
-  const [companyReady, setCompanyReady] = useState(false);
-  const [companyError, setCompanyError] = useState("");
+  const shareCompany = quotation.brand || { name: "", contact: "", logo: "" };
+  const companyReady = !!quotation.brand && !quotation.brand.logoError;
+  const companyError = quotation.brand?.logoError;
   const [productCard, setProductCard] = useState(null);
   const [cardGenerating, setCardGenerating] = useState(false);
   const [cardAttempt, setCardAttempt] = useState(0);
@@ -68,64 +41,10 @@ export default function Catalog({ cloud = null }) {
   const [price, setPrice] = useState("");
   const [image, setImage] = useState("");
 
+  useEffect(() => { if (quotation.requested && quotation.ready) setQuotationOpen(true); }, [quotation.requested, quotation.ready]);
   useEffect(() => {
-    if (cloud) return;
-    try {
-      setItems(readStoredJson(CATALOG_KEY, validCatalog, samples));
-      setReady(true);
-    } catch (err) {
-      setCatalogError(`无法读取产品资料：${err.message || "请检查浏览器存储后刷新重试。"}`);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (cloud || !ready) return;
-    try {
-      localStorage.setItem(CATALOG_KEY, JSON.stringify(items));
-      setCatalogError("");
-    } catch {
-      setCatalogError("产品资料未能保存，刷新后可能丢失。请检查浏览器存储空间。");
-    }
-  }, [localItems, ready, !!cloud]);
-
-  useEffect(() => {
-    try {
-      setQuotationItems(readStoredJson(QUOTATION_KEY, validQuotation, []));
-      setQuotationReady(true);
-    } catch (err) {
-      // Preserve the saved draft if it cannot be read.
-      setQuotationError(`无法读取报价清单：${err.message || "请检查浏览器存储后刷新重试。"}`);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!quotationReady) return;
-    try {
-      localStorage.setItem(QUOTATION_KEY, JSON.stringify(quotationItems));
-      setQuotationError("");
-    } catch {
-      setQuotationError("报价清单未能保存到浏览器，刷新后可能丢失。请检查存储空间。");
-    }
-  }, [quotationItems, quotationReady]);
-
-  function refreshCompany() {
-    if (cloud) {
-      setShareCompany({ ...DEFAULT_COMPANY, name: cloud.name });
-      setCompanyReady(true);
-      return;
-    }
-    try {
-      const saved = readStoredJson(DETAILS_KEY, validDetails, null);
-      setShareCompany(saved?.company || DEFAULT_COMPANY);
-      setCompanyReady(true);
-      setCompanyError("");
-    } catch (err) {
-      setCompanyReady(false);
-      setCompanyError(`无法读取公司资料：${err.message || "请检查浏览器存储后刷新重试。"}`);
-    }
-  }
-
-  useEffect(() => { refreshCompany(); }, []);
+    if (!cloud.canManage) { resetForm(); setOpen(false); }
+  }, [cloud.canManage]);
 
   useEffect(() => {
     if (!cloud || !selectedProduct) return;
@@ -167,7 +86,6 @@ export default function Catalog({ cloud = null }) {
   function openProductDetail(item) {
     setDetailMessage("");
     setProductCard(null);
-    refreshCompany();
     setSelectedProduct(item);
   }
 
@@ -194,38 +112,16 @@ export default function Catalog({ cloud = null }) {
     setQuotationOpen(true);
   }
 
-  function addToQuotation(item) {
+  async function addToQuotation(item) {
     const unitPrice = Number(item.price);
     if (moneyToCents(item.price) === null || unitPrice > MAX_UNIT_PRICE) {
       setDetailMessage("产品价格无效，无法加入报价清单。");
       return;
     }
 
-    if (quotationItems.some(line => line.product.id === item.id && line.quantity >= MAX_QUANTITY)) {
-      setDetailMessage("此产品的数量已达到上限，请到报价清单调整。");
-      return;
-    }
-
-    setQuotationItems((prev) => {
-      const existing = prev.find((line) => line.product.id === item.id);
-      if (existing) {
-        return prev.map((line) => line.product.id === item.id
-          ? {
-              ...line,
-              quantity: line.quantity + 1,
-              lineTotal: lineCents({ ...line, quantity: line.quantity + 1 }) / 100
-            }
-          : line);
-      }
-      return [...prev, {
-        // Keep a small snapshot so catalog deletion does not change the draft.
-        product: { id: item.id, serial: item.serial, name: item.name },
-        quantity: 1,
-        unitPrice,
-        lineTotal: moneyToCents(item.price) / 100
-      }];
-    });
-    setDetailMessage(`已加入报价清单（共 ${quotationCount + 1} 件）。`);
+    setDetailMessage("正在加入并保存到云端…");
+    const saved = await quotation.add(item);
+    setDetailMessage(saved ? "已加入报价清单，并保存到公司云端。" : "加入结果未确认，请查看报价错误提示，勿重复加入。");
   }
 
   const filtered = useMemo(() => {
@@ -282,7 +178,7 @@ export default function Catalog({ cloud = null }) {
     }
 
     const newItem = {
-      id: editingId || (cloud ? (pendingId.current ||= crypto.randomUUID()) : makeId()),
+      id: editingId || (pendingId.current ||= crypto.randomUUID()),
       serial: serial.trim(),
       name: name.trim(),
       tags: tags
@@ -293,30 +189,21 @@ export default function Catalog({ cloud = null }) {
       image
     };
 
-    if (cloud) {
-      setSaving(true);
-      try {
-        await cloud.save(newItem, editingRecord);
-        resetForm(); setOpen(false);
-      } catch (err) { setFormError(`保存失败：${err.message}。表单仍保留，请检查网络后重试。`); }
-      finally { setSaving(false); }
-      return;
-    }
-    setItems((prev) => editingId
-      ? prev.map(item => item.id === editingId ? { ...item, ...newItem } : item)
-      : [newItem, ...prev]);
-    closeForm();
+    setSaving(true);
+    try {
+      await cloud.save(newItem, editingRecord);
+      resetForm(); setOpen(false);
+    } catch (err) { setFormError(`保存失败：${err.message}。表单仍保留，请检查网络后重试。`); }
+    finally { setSaving(false); }
   }
 
   async function deleteItem(id) {
     if (saving) return;
     if (!window.confirm("确定删除这个产品吗？")) return;
-    if (cloud) {
-      setSaving(true);
-      try { await cloud.remove(items.find(item => item.id === id)); setCatalogError(""); }
-      catch (err) { setCatalogError(`删除失败：${err.message}`); }
-      finally { setSaving(false); }
-    } else setItems((prev) => prev.filter((x) => x.id !== id));
+    setSaving(true);
+    try { await cloud.remove(items.find(item => item.id === id)); setCatalogError(""); }
+    catch (err) { setCatalogError(`删除失败：${err.message}`); }
+    finally { setSaving(false); }
   }
 
   async function onImageChange(file) {
@@ -334,12 +221,8 @@ export default function Catalog({ cloud = null }) {
     }
   }
 
-  if (quotationOpen) {
-    return <Quotation items={quotationItems} setItems={setQuotationItems}
-      ready={quotationReady} error={quotationError} onBack={() => {
-        refreshCompany();
-        setQuotationOpen(false);
-      }} />;
+  if (quotationOpen && quotationReady) {
+    return <Quotation quotation={quotation} context={cloud.context} onBack={() => setQuotationOpen(false)} />;
   }
 
   return (
@@ -356,8 +239,9 @@ export default function Catalog({ cloud = null }) {
       </section>
 
       <div className="notice">
-        {cloud ? `公司云端产品：${cloud.name}。报价和报价品牌仍保存在此浏览器；产品卡片使用当前公司名称。` : "产品和报价保存在这台设备的浏览器中。"}
-        {!cloud && <p><Link href="/cloud">进入公司云端产品 →</Link></p>}
+        公司工作区：{cloud.name}。产品、报价、客户资料和公司品牌均保存在公司云端。
+        <p>{quotation.dirty ? "报价有未保存修改，请打开报价清单保存。" : quotation.message}</p>
+        <button onClick={() => void quotation.reload()} disabled={quotation.busy}>重新读取报价与品牌</button>
       </div>
 
       <div className="quotationSummary" role="status" aria-live="polite">
@@ -386,13 +270,13 @@ export default function Catalog({ cloud = null }) {
         )}
       </div>
 
-      <button className="addButton" disabled={saving || (cloud ? !cloud.canWrite : !ready)} onClick={() => { resetForm(); setOpen(true); }}>
+      <button className="addButton" disabled={saving || !cloud.canWrite} onClick={() => { resetForm(); setOpen(true); }}>
         ＋ 新增产品
       </button>
 
       <section className="list">
         {filtered.length === 0 ? (
-          <div className="empty">{cloud || ready ? "没有找到符合的产品。" : catalogError ? "产品资料暂时无法读取。" : "正在读取产品资料…"}</div>
+          <div className="empty">没有找到符合的产品。</div>
         ) : (
           filtered.map((item) => (
             <article className="card" key={item.id} onClick={() => openProductDetail(item)}>
@@ -528,7 +412,7 @@ export default function Catalog({ cloud = null }) {
             <button
               type="button"
               className="saveButton"
-              disabled={!quotationReady}
+              disabled={!quotationReady || quotation.busy}
               onClick={() => addToQuotation(selectedProduct)}
             >
               ＋ 加入报价清单

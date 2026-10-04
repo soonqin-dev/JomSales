@@ -1,5 +1,6 @@
 import { jsPDF } from "jspdf";
 import { formatMoney, lineCents, moneyToCents, quotationTotals } from "./quotation-utils";
+import { loadImage } from "./images";
 
 // Render with browser fonts so Chinese names and notes do not require a large bundled font.
 // Only this export module loads jsPDF, after the salesperson taps Generate PDF.
@@ -12,10 +13,8 @@ export async function createQuotationPdf({ items, details, company }) {
   await document.fonts.ready;
   let logo = null;
   if (company.logo) {
-    if (!/^data:image\/(png|jpeg|webp);base64,/.test(company.logo)) throw new Error("公司 Logo 无效，请重新上传。");
-    logo = new Image();
-    logo.src = company.logo;
-    try { await logo.decode(); } catch { throw new Error("公司 Logo 无法显示，请重新上传。"); }
+    if (!/^data:image\/(png|jpeg|webp);base64,/.test(company.logo) && !/^https?:\/\//.test(company.logo)) throw new Error("公司 Logo 无效，请重新上传。");
+    try { logo = await loadImage(company.logo); } catch { throw new Error("公司 Logo 无法显示，请刷新公司品牌链接或重新上传。"); }
   }
 
   const width = 794;

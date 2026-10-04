@@ -76,7 +76,7 @@ export default function JoinPage() {
   return <main className="page accountPage">
     <Link href="/account">← 公司账号</Link>
     <h1>加入公司</h1>
-    <p className="notice">邀请只授予指定公司的销售员权限，不会搬迁、上传或删除你浏览器里的本地产品和报价。</p>
+    <p className="notice">加入后使用该公司的云端产品和自己的云端报价。邀请不会自动迁移或删除旧浏览器资料；旧资料迁移须由管理员明确操作。</p>
     {loading && <p role="status">正在检查邀请…</p>}
     {error && <p className="accountError" role="alert">{error}</p>}
     {!loading && !user && !error && <section className="accountCard">

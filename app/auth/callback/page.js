@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClient } from "../../../lib/supabase/client";
+import { pendingInvite } from "../../../lib/supabase/invitations";
 
 export default function AuthCallback() {
   const [message, setMessage] = useState("正在确认邮箱验证结果…");
@@ -17,7 +18,7 @@ export default function AuthCallback() {
         window.history.replaceState(null, "", "/auth/callback");
         if (cancelled) return;
         if (failure) setMessage("验证链接无效或已过期。请返回账号页重新发送验证邮件。");
-        else if (data.user && !error) window.location.replace("/account");
+        else if (data.user && !error) window.location.replace(pendingInvite() ? "/join" : "/");
         else setMessage("请返回账号页尝试登录。若邮箱尚未验证，请重新发送邮件，并在注册时使用的同一浏览器打开链接。");
       } catch {
         if (!cancelled) setMessage("暂时无法确认验证结果，请返回账号页尝试登录或重新发送验证邮件。");

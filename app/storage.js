@@ -45,14 +45,7 @@ export function readStoredJson(key, validate, fallback) {
         !value.company.contact && !value.company.logo) {
       value = { ...value, company: { ...value.company, name: "" } };
     }
-    const saved = JSON.stringify(value);
-    try {
-      localStorage.setItem(key, saved);
-      if (localStorage.getItem(key) !== saved) throw new Error("Storage write failed");
-    } catch {
-      throw new Error("资料迁移未完成，旧资料仍保留。请释放浏览器存储空间后刷新重试。");
-    }
-    // Keep legacy keys as a backup; never overwrite an existing SalesGo key.
+    // Read-only legacy migration. Never write, rename or clear browser business data.
   }
   return value;
 }

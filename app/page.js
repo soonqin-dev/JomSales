@@ -1,2 +1,3 @@
-import Catalog from "./Catalog";
-export default function Home() { return <Catalog />; }
+import { redirect } from "next/navigation";
+import { requireUser } from "../lib/supabase/server";
+export default async function Home() { await requireUser(); redirect("/cloud"); }

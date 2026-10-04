@@ -92,8 +92,7 @@ export default function AccountPage() {
       if (mode === "register" && !result.data.session) {
         setMessage("注册申请已提交。请检查邮箱（包括垃圾邮件），验证后回来登录。如邮箱已注册，请直接登录。");
       } else {
-        setMessage("登录成功，可进入公司云端产品。本地产品与报价不会自动同步。");
-        await refresh();
+        window.location.replace(hasInvite ? "/join" : "/");
       }
     });
   }
@@ -101,7 +100,7 @@ export default function AccountPage() {
   return <main className="page accountPage">
     <Link href="/">← 返回产品目录</Link>
     <h1>SalesGo 公司账号</h1>
-    <div className="notice">公司云端产品与本地产品分开使用。报价和报价品牌仍保存在此浏览器，尚未云端同步。退出登录不会删除本地资料；共用设备上的其他使用者仍可能看到本地资料。</div>
+    <div className="notice">SalesGo 需先登录并创建或加入公司。产品、报价、客户资料与公司品牌统一保存到公司云端；旧浏览器资料只供管理员主动迁移。</div>
     {hasInvite && <p className="notice">你正在接受员工邀请，请使用受邀邮箱注册／登录，无需创建公司。<Link href="/join">返回邀请并确认加入 →</Link></p>}
     {error && <p className="accountError" role="alert">{error}</p>}
     {message && <p className="notice" role="status">{message}</p>}
@@ -124,7 +123,7 @@ export default function AccountPage() {
           if (rpcError) throw rpcError;
           setCompanyName("");
           setMessage("公司已创建，你是该公司的管理员。");
-          await refresh();
+          window.location.replace("/cloud");
         });
       }}>
         <h2>创建你的公司</h2>
@@ -138,7 +137,7 @@ export default function AccountPage() {
         if (result.error) throw result.error;
         ++revision.current;
         setUser(null); setMemberships([]); setPassword("");
-        setMessage("已退出此设备的账号。本地产品与报价未删除。");
+        window.location.replace("/account");
       })}>退出此设备的登录</button>
     </section> : <section className="accountCard">
       <div className="accountTabs">

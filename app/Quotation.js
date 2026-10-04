@@ -1,46 +1,20 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import Link from "next/link";
 import { MAX_QUANTITY, MAX_UNIT_PRICE, formatMoney, lineCents, moneyToCents,
-  newQuotationDetails, quotationTotals } from "./quotation-utils";
+  quotationTotals } from "./quotation-utils";
 import { canShareFile, downloadFile } from "./share";
-import { DEFAULT_COMPANY, DETAILS_KEY, readStoredJson, validDetails } from "./storage";
-import { prepareUploadImage } from "./images";
+const signature = (items, details, company, edits = {}) => JSON.stringify({ items, details,
+  company: { name: company.name, contact: company.contact, logo_path: company.logo_path }, edits });
 
-export default function Quotation({ items, setItems, ready, error, onBack }) {
-  const [details, setDetails] = useState(newQuotationDetails);
-  const [company, setCompany] = useState(DEFAULT_COMPANY);
-  const [metadataReady, setMetadataReady] = useState(false);
-  const [storageError, setStorageError] = useState("");
+export default function Quotation({ quotation, context, onBack }) {
+  const { items = [], setItems, details, setDetails, company, ready, error } = quotation;
   const [edits, setEdits] = useState({});
   const [generating, setGenerating] = useState(false);
   const [sharing, setSharing] = useState(false);
-  const [logoLoading, setLogoLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [pdf, setPdf] = useState(null);
-
-  useEffect(() => {
-    try {
-      const saved = readStoredJson(DETAILS_KEY, validDetails, null);
-      if (saved) {
-        setDetails(saved.details);
-        setCompany(saved.company);
-      }
-      setMetadataReady(true);
-    } catch (err) {
-      setStorageError(`无法读取报价资料：${err.message || "请检查浏览器存储后刷新重试。原资料未被覆盖。"}`);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!metadataReady) return;
-    try {
-      localStorage.setItem(DETAILS_KEY, JSON.stringify({ details, company }));
-      setStorageError("");
-    } catch {
-      setStorageError("报价资料未能保存，刷新后可能丢失。请检查浏览器存储空间。");
-    }
-  }, [details, company, metadataReady]);
 
   const totals = quotationTotals(items, details.discount);
   const invalidRows = items.some(item => {
@@ -51,9 +25,9 @@ export default function Quotation({ items, setItems, ready, error, onBack }) {
       Number(draft.unitPrice) > MAX_UNIT_PRICE
     ));
   });
-  const fingerprint = JSON.stringify({ items, details, company, edits });
-  const currentPdf = pdf?.fingerprint === fingerprint ? pdf.file : null;
-  const locked = generating || sharing || logoLoading || !ready || !metadataReady;
+  const fingerprint = signature(items, details, company, edits);
+  const currentPdf = !quotation.dirty && pdf?.fingerprint === fingerprint ? pdf.file : null;
+  const locked = generating || sharing || quotation.busy || !ready;
 
   function updateLine(item, field, value) {
     const draft = { quantity: String(item.quantity), unitPrice: String(item.unitPrice),
@@ -84,30 +58,13 @@ export default function Quotation({ items, setItems, ready, error, onBack }) {
   }
 
   function startNewQuotation() {
-    if (!window.confirm("新建报价将清空当前产品和客户资料，已下载的 PDF 不受影响。继续吗？")) return;
-    setItems([]);
-    setDetails(newQuotationDetails());
-    setEdits({});
-    setPdf(null);
-    setMessage("");
+    if (!quotation.startNew()) return;
+    setEdits({}); setPdf(null); setMessage("");
   }
 
-  async function uploadLogo(file) {
-    if (!file) return;
-    if (file.size > 1024 * 1024) {
-      setMessage("公司 Logo 请使用不超过 1MB 的图片。");
-      return;
-    }
-    setLogoLoading(true);
-    try {
-      const dataUrl = await prepareUploadImage(file);
-      setCompany(prev => ({ ...prev, logo: dataUrl }));
-      setMessage("");
-    } catch (err) {
-      setMessage(err.message || "无法读取 Logo，请选择有效的图片文件。");
-    } finally {
-      setLogoLoading(false);
-    }
+  async function saveDraft() {
+    try { await quotation.save(); setEdits({}); setPdf(null); setMessage(""); }
+    catch (err) { setMessage(err.message); }
   }
 
   async function generatePdf(event) {
@@ -122,9 +79,12 @@ export default function Quotation({ items, setItems, ready, error, onBack }) {
     setMessage("");
     try {
       const { createQuotationPdf } = await import("./quotation-pdf");
-      const file = await createQuotationPdf({ items, details, company });
-      setPdf({ file, fingerprint });
-      setMessage("报价 PDF 已生成，可以下载或分享给客户。");
+      const saved = await quotation.save();
+      if (saved.company.logoError) throw new Error(saved.company.logoError);
+      const file = await createQuotationPdf(saved);
+      setEdits({});
+      setPdf({ file, fingerprint: signature(saved.items, saved.details, saved.company) });
+      setMessage("报价已保存到云端，PDF 已生成，可以下载或分享给客户。");
     } catch (err) {
       setMessage(err.message || "PDF 生成失败，请重试。");
     } finally {
@@ -154,7 +114,7 @@ export default function Quotation({ items, setItems, ready, error, onBack }) {
   return (
     <main className="page quotationPage">
       <div className="quotationNavigation">
-        <button type="button" className="cancelButton" onClick={onBack} disabled={generating || sharing || logoLoading}>
+        <button type="button" className="cancelButton" onClick={onBack} disabled={locked}>
           ← 返回产品目录
         </button>
         <button type="button" className="textButton" onClick={startNewQuotation} disabled={locked}>
@@ -167,7 +127,10 @@ export default function Quotation({ items, setItems, ready, error, onBack }) {
         <p>编辑产品，填写客户资料，生成报价 PDF。</p>
       </header>
       {error && <p className="quotationError" role="alert">{error}</p>}
-      {storageError && <p className="quotationError" role="alert">{storageError}</p>}
+      <p role="status">{quotation.dirty ? "有未保存修改（仅在当前页面内存）。请保存后再离开。" : quotation.message || "报价从公司云端读取。"}</p>
+      {company.logoError && <p className="quotationError" role="alert">{company.logoError}</p>}
+      <button type="button" disabled={locked || invalidRows || totals.total === null} onClick={saveDraft}>保存到云端</button>
+      <Link href={`/quotations?company=${context.companyId}`}>已保存报价</Link>
 
       <form onSubmit={generatePdf}>
         <fieldset className="quotationFields" disabled={locked}>
@@ -227,7 +190,7 @@ export default function Quotation({ items, setItems, ready, error, onBack }) {
             <label>报价编号<input value={details.number} readOnly /></label>
             <label>日期 *<input type="date" value={details.date} required
               onChange={e => updateDetails("date", e.target.value)} /></label>
-            <label>备注<textarea value={details.notes} maxLength={3000} rows={3}
+            <label>备注<textarea aria-label="备注" value={details.notes} maxLength={3000} rows={3}
               onChange={e => updateDetails("notes", e.target.value)} placeholder="例如报价有效期、交货说明" /></label>
             <label>折扣（RM）<input type="number" min="0" step="0.01" inputMode="decimal"
               value={details.discount} aria-invalid={totals.total === null}
@@ -240,28 +203,17 @@ export default function Quotation({ items, setItems, ready, error, onBack }) {
             </dl>
           </section>
 
-          <details className="quotationSection companySettings">
-            <summary>公司资料（用于报价与产品卡片）</summary>
-            <label>公司名称 *<input value={company.name} required maxLength={120}
-              onInvalid={e => { e.currentTarget.closest("details").open = true; }}
-              onChange={e => setCompany(prev => ({ ...prev, name: e.target.value }))} /></label>
-            <label>公司电话 / 联系方式<input value={company.contact} maxLength={180}
-              onChange={e => setCompany(prev => ({ ...prev, contact: e.target.value }))} placeholder="电话、Email 或地址" /></label>
-            <label>公司 Logo<input type="file" accept="image/png,image/jpeg,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif"
-              onChange={e => {
-                const file = e.target.files?.[0];
-                e.target.value = "";
-                uploadLogo(file);
-              }} /><small>PNG、JPG、WebP 或 HEIC，不超过 1MB，自动选择兼容格式；HEIC 需浏览器支持读取。</small></label>
-            {company.logo && <div className="companyLogoPreview">
-              <img src={company.logo} alt="公司 Logo" />
-              <button type="button" className="textButton" onClick={() => setCompany(prev => ({ ...prev, logo: "" }))}>移除 Logo</button>
-            </div>}
-          </details>
+          <section className="quotationSection companySettings">
+            <h2>公司资料（首次保存时的快照）</h2>
+            <p>{company.name} · {company.contact}</p>
+            {company.logo && <div className="companyLogoPreview"><img src={company.logo} alt="公司 Logo" /></div>}
+            <p>历史报价不会随产品或公司品牌修改而改变。</p>
+            {context.role === "admin" && <Link href={`/brand?company=${context.companyId}`}>管理公司品牌（新报价生效）</Link>}
+          </section>
         </fieldset>
 
         <button type="submit" className="generatePdfButton saveButton"
-          disabled={locked || !items.length || invalidRows || totals.total === null}>
+          disabled={locked || !items.length || invalidRows || totals.total === null || !!company.logoError}>
           {generating ? "正在生成 PDF…" : "生成报价 PDF"}
         </button>
       </form>
