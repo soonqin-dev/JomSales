@@ -7,6 +7,7 @@ import { createClient } from "../../lib/supabase/client";
 import { readProducts, signedProducts, saveProduct, deleteProduct, importProduct } from "../../lib/supabase/products";
 import { CATALOG_KEY, validCatalog, readStoredJson } from "../storage";
 import { downloadFile } from "../share";
+import { canManageProducts } from "../../lib/supabase/permissions";
 
 export default function CloudCatalogPage() {
   const [context, setContext] = useState(null);
@@ -18,6 +19,7 @@ export default function CloudCatalogPage() {
   const [message, setMessage] = useState("");
   const [preview, setPreview] = useState(null);
   const generation = useRef(0);
+  const verification = useRef(0);
   const scope = useRef(null);
   const rows = useRef([]);
   const working = useRef(false);
@@ -35,7 +37,7 @@ export default function CloudCatalogPage() {
       if (!auth.data.user) {
         scope.current = null; setContext(null); setItems([]); return;
       }
-      const result = await client.from("company_members").select("company_id,role,companies(id,name)")
+      const result = await client.from("company_members").select("company_id,role,can_manage_products,companies(id,name)")
         .eq("user_id", auth.data.user.id).eq("active", true);
       if (result.error) throw result.error;
       const companyId = requestedCompany || scope.current?.companyId || new URLSearchParams(window.location.search).get("company") || result.data?.[0]?.company_id;
@@ -43,12 +45,12 @@ export default function CloudCatalogPage() {
       if (!member?.companies) throw new Error("你尚未加入公司，或公司权限已被停用。请到公司账号页确认。");
       const products = await readProducts(client, companyId);
       if (version !== generation.current) return;
-      const next = { userId: auth.data.user.id, companyId, role: member.role, name: member.companies.name, memberships: result.data };
+      const next = { userId: auth.data.user.id, companyId, role: member.role, can_manage_products: member.can_manage_products === true, name: member.companies.name, memberships: result.data };
       scope.current = next; setContext(next); setItems(products); setVerified(true);
     } catch (err) {
       if (version === generation.current) {
         scope.current = null; setContext(null); setItems([]);
-        setError(`云端读取失败：${err.message}。请检查网络，以及是否已执行云端产品 SQL。不会改用本地资料。`);
+        setError(`云端读取失败：${err.message}。请检查网络，以及是否已执行云端产品和最新产品权限 SQL。不会改用本地资料。`);
       }
     } finally { if (version === generation.current) setLoading(false); }
   }
@@ -73,31 +75,39 @@ export default function CloudCatalogPage() {
       const current = scope.current;
       if (!current || working.current) return;
       const version = generation.current;
+      const attempt = ++verification.current;
       try {
         const client = createClient();
         const auth = await client.auth.getUser();
         if (auth.error && auth.error.name !== "AuthSessionMissingError") throw auth.error;
+        if (version !== generation.current || attempt !== verification.current || working.current) return;
         if (auth.data.user?.id !== current.userId) {
           if (version === generation.current) {
             ++generation.current; scope.current = null; setContext(null); setItems([]); setPreview(null);
           }
           throw new Error("登录状态已改变，请重新登录。");
         }
-        const member = await client.from("company_members").select("role")
+        const member = await client.from("company_members").select("role,can_manage_products")
           .eq("user_id", current.userId).eq("company_id", current.companyId).eq("active", true).maybeSingle();
         if (member.error) throw member.error;
+        if (version !== generation.current || attempt !== verification.current || working.current) return;
         if (!member.data) {
           if (version === generation.current) {
             ++generation.current; scope.current = null; setContext(null); setItems([]); setPreview(null);
           }
           throw new Error("公司权限已被停用。");
         }
+        const next = { ...current, role: member.data.role, can_manage_products: member.data.can_manage_products === true };
+        if (version !== generation.current || attempt !== verification.current || working.current) return;
+        // Reconcile access before slow image signing. Changing this capability
+        // remounts the catalog, closing any stale product editor.
+        if (!canManageProducts(next)) setPreview(null);
+        scope.current = next; setContext(next);
         const renewed = await signedProducts(client, rows.current);
-        if (version !== generation.current || working.current) return;
-        const next = { ...current, role: member.data.role };
+        if (version !== generation.current || attempt !== verification.current || working.current) return;
         scope.current = next; setContext(next); setItems(renewed); setVerified(true);
       } catch (err) {
-        if (version === generation.current || !scope.current) {
+        if (attempt === verification.current && !working.current && (version === generation.current || !scope.current)) {
           setVerified(false); setError(`无法确认公司权限或更新图片：${err.message}。请刷新重试。`);
         }
       }
@@ -107,8 +117,8 @@ export default function CloudCatalogPage() {
     return () => { ++generation.current; clearTimeout(timer); clearInterval(interval); subscription?.unsubscribe(); window.removeEventListener("focus", verify); };
   }, []);
 
-  async function operation(task) {
-    if (working.current || !verified || !context || context.role !== "admin") throw new Error("当前没有可用的管理员权限。");
+  async function operation(task, adminOnly = false) {
+    if (working.current || !verified || !context || !canManageProducts(context) || (adminOnly && context.role !== "admin")) throw new Error("当前没有可用的产品管理权限。请刷新确认；批量导入仍仅限管理员。");
     working.current = true; setBusy(true); setError(""); setMessage("正在保存到云端…");
     const version = generation.current;
     try { return await task(createClient(), context, version); }
@@ -175,7 +185,7 @@ export default function CloudCatalogPage() {
         }
         catch (err) { setError(`导入结果已记录，但刷新失败：${err.message}。请刷新云端产品。`); }
         if (version === generation.current) setPreview(null);
-      });
+      }, true);
     } catch (err) { setError(err.message); }
   }
 
@@ -183,7 +193,8 @@ export default function CloudCatalogPage() {
     <div className="cloudControls">
       <Link href="/">← 本地产品（保留的原件）</Link>
       <h1>公司云端产品</h1>
-      <p>仅管理员可维护产品；销售员可查阅。其他设备更新后，请刷新读取。图片链接五分钟有效，页面会定期续期。已下载或分享的内容无法撤回。</p>
+      <p>管理员和已获产品管理权限的销售员可新增、编辑、删除产品；其他销售员可查阅和分享。其他设备更新或权限变更后，请刷新读取。图片链接五分钟有效，页面会定期续期。已下载或分享的内容无法撤回。</p>
+      {context && <p className="notice">你的产品权限：{canManageProducts(context) ? "可管理（新增、编辑、删除）" : "仅查看与分享"}。员工与权限设置仅限管理员。</p>}
       <div className="cloudButtons">
         <button disabled={busy || loading} onClick={() => void load()}>刷新云端产品</button>
         <Link href="/account">公司账号</Link>
@@ -211,8 +222,8 @@ export default function CloudCatalogPage() {
         </div>
       </section>}
     </div>
-    {!loading && context && <Catalog key={`${context.userId}:${context.companyId}:${context.role}`} cloud={{
-      items, name: context.name, canWrite: verified && context.role === "admin" && !busy, save, remove
+    {!loading && context && <Catalog key={`${context.userId}:${context.companyId}:${context.role}:${canManageProducts(context)}`} cloud={{
+      items, name: context.name, canWrite: verified && canManageProducts(context) && !busy, save, remove
     }} />}
   </>;
 }

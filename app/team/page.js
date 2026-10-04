@@ -49,7 +49,7 @@ export default function TeamPage() {
       const member = companies.find(m => m.company_id === selected);
       if (!member) throw new Error("此公司没有可用的管理员权限。请回公司账号页确认。");
       const [team, invitations] = await Promise.all([
-        client.rpc("get_company_team", { target_company: selected }),
+        client.rpc("get_company_team_permissions", { target_company: selected }),
         client.rpc("get_company_invitations", { target_company: selected })
       ]);
       if (team.error) throw team.error;
@@ -118,7 +118,7 @@ export default function TeamPage() {
   return <main className="page accountPage">
     <Link href="/account">← 公司账号</Link>
     <h1>员工与邀请</h1>
-    <p className="notice">每位员工使用自己的邮箱登录。销售员可查阅公司产品；报价目前仍保存在各自浏览器。停用仅撤销公司权限，不删除产品，也不能收回已经下载或分享的资料。</p>
+    <p className="notice">每位员工使用自己的邮箱登录。销售员默认只可查阅和分享，可单独授权产品管理（新增、编辑、删除），不会变成管理员。报价目前仍保存在各自浏览器。停用会撤销全部公司访问权限，但不删除产品，也不能收回已经下载或分享的资料。</p>
     <button disabled={busy || loading} onClick={() => void load()}>刷新员工与邀请</button>
     {loading && <p role="status">正在读取员工资料…</p>}
     {error && <p className="accountError" role="alert">{error}</p>}
@@ -151,7 +151,23 @@ export default function TeamPage() {
       {!loading && <>
         <section className="accountCard"><h2>公司成员（{members.length}）</h2>
           {members.map(member => <div className="teamRow" key={member.user_id}>
-            <div><strong>{member.email || "邮箱不可用"}</strong><p>{member.role === "admin" ? "管理员" : "销售员"} · {member.active ? "可访问" : "已停用"}{member.user_id === context.userId && " · 你"}</p></div>
+            <div><strong>{member.email || "邮箱不可用"}</strong><p>{member.role === "admin" ? "管理员" : "销售员"} · {member.active ? "可访问" : "已停用"}{member.user_id === context.userId && " · 你"}</p>
+              {member.role === "admin" ? <p>产品管理：始终允许（管理员）</p> : <>
+                <label className="teamPermission">
+                  <input type="checkbox" aria-label={`${member.email} 的产品管理权限`} checked={member.can_manage_products === true} disabled={busy} onChange={e => {
+                    const enabled = e.target.checked;
+                    if (!window.confirm(`${enabled ? "允许" : "收回"} ${member.email} 在 ${context.name} 的产品管理权限（新增、编辑、删除）？不会改变管理员角色或账号停用状态。`)) return;
+                    void perform(async (client, current) => {
+                      const result = await client.rpc("set_employee_product_permission", { target_company: current.companyId, employee_id: member.user_id, enabled });
+                      if (result.error) throw result.error;
+                      return enabled ? "已允许此销售员管理产品。员工刷新后可新增、编辑和删除；停用的账号仍不能访问。" : "已收回产品管理权限，员工仍可查看与分享（账号须未停用）。请让员工刷新页面。";
+                    });
+                  }} />
+                  产品管理（新增、编辑、删除）
+                </label>
+                {!member.active && <p>账号已停用，此权限暂不生效；恢复访问后按当前设置生效。</p>}
+              </>}
+            </div>
             {member.role === "sales" && member.user_id !== context.userId && <button disabled={busy} onClick={() => {
               if (!window.confirm(`${member.active ? "停用" : "恢复"} ${member.email} 在 ${context.name} 的访问权限？公司产品会保留。`)) return;
               void perform(async (client, current) => {

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
 import { pendingInvite } from "../../lib/supabase/invitations";
+import { canManageProducts } from "../../lib/supabase/permissions";
 
 export default function AccountPage() {
   const [user, setUser] = useState(null);
@@ -32,7 +33,7 @@ export default function AccountPage() {
       setMembershipLoaded(false);
       if (data.user) {
         const result = await client.from("company_members")
-          .select("company_id, role, companies(id, name)")
+          .select("company_id, role, can_manage_products, companies(id, name)")
           .eq("user_id", data.user.id).eq("active", true);
         if (version !== revision.current) return;
         if (result.error) throw result.error;
@@ -111,6 +112,7 @@ export default function AccountPage() {
         {memberships.map(member => <div className="notice" key={member.company_id}>
           <strong>{member.companies?.name || "公司资料暂不可用"}</strong>
           <p>角色：{member.role === "admin" ? "管理员" : "销售员"}</p>
+          <p>产品权限：{canManageProducts(member) ? "可管理（新增、编辑、删除）" : "仅查看与分享"}</p>
           <p><Link href={`/cloud?company=${member.company_id}`}>进入此公司云端产品 →</Link></p>
           {member.role === "admin" && <p><Link href={`/team?company=${member.company_id}`}>员工与邀请 →</Link></p>}
         </div>)}

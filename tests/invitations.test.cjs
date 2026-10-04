@@ -39,5 +39,5 @@ test("existing invitation survives account navigation, and errors explain recove
   assert.equal(api.captureInvite(), "b".repeat(64));
   assert.match(api.teamError({ message: "Company access is disabled." }), /停用/);
   assert.match(api.teamError({ message: "Invitation invalid or for another email." }), /受邀邮箱/);
-  assert.match(api.teamError({ code: "PGRST202" }), /执行员工邀请 SQL/);
+  assert.match(api.teamError({ code: "PGRST202" }), /执行对应的新 SQL/);
 });

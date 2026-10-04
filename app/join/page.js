@@ -87,12 +87,12 @@ export default function JoinPage() {
     </section>}
     {user && !joined && <p>当前账号：{user.email}。<Link href="/account">需要换账号？前往退出并重新登录</Link></p>}
     {!loading && invite && <section className="accountCard">
-      <h2>{invite.company_name}</h2><p>受邀邮箱：{invite.email}</p><p>角色：销售员（可查阅公司产品）</p>
+      <h2>{invite.company_name}</h2><p>受邀邮箱：{invite.email}</p><p>角色：销售员（默认只读，产品管理权限由管理员设置）</p>
       <p>{invite.already_accepted ? "你曾接受此邀请，将重新确认当前权限。" : `到期：${new Date(invite.expires_at).toLocaleString()}`}</p>
       <button disabled={busy} onClick={() => void accept()}>{busy ? "正在加入…" : invite.already_accepted ? "确认公司访问权限" : "接受邀请并加入公司"}</button>
     </section>}
     {joined && <section className="accountCard" role="status"><h2>已加入公司</h2>
-      <p>你已获得销售员权限，管理员维护的产品可在公司云端查阅。</p>
+      <p>你已获得公司访问权限，可到公司云端查阅产品；产品管理权限由管理员设置。</p>
       <Link href={`/cloud?company=${joined}`}>进入公司云端产品 →</Link>
     </section>}
     {!loading && !joined && token.current && <button disabled={busy} onClick={() => void load()}>重新检查邀请</button>}

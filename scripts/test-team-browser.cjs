@@ -14,6 +14,8 @@ const invitations = [];
 const errors = [];
 let joined = false, active = true, failCreate = false, acceptedCalls = 0;
 let registered = false;
+let canManage = false, failPermission = false;
+let holdNextPermissionRead = false, permissionReadStarted, releasePermissionRead;
 
 (async () => {
   const browser = await chromium.launch({ channel: process.env.SALESGO_BROWSER_CHANNEL || "msedge", headless: true });
@@ -45,19 +47,26 @@ let registered = false;
           data = current?.id === users.admin.id ? [{ company_id: company, role: "admin", companies: { id: company, name: "Test Company A" } }]
             : current?.id === users.employee.id ? [
               { company_id: anotherCompany, role: "sales", companies: { id: anotherCompany, name: "Already joined Company B" } },
-              ...(joined && active ? [{ company_id: company, role: "sales", companies: { id: company, name: "Test Company A" } }] : [])
+              ...(joined && active ? [{ company_id: company, role: "sales", can_manage_products: canManage, companies: { id: company, name: "Test Company A" } }] : [])
             ] : [];
+          const requestedCompany = url.searchParams.get("company_id")?.replace(/^eq\./, "");
+          if (requestedCompany) data = data.filter(member => member.company_id === requestedCompany);
+          if (holdNextPermissionRead && url.searchParams.get("select") === "role,can_manage_products") {
+            holdNextPermissionRead = false;
+            permissionReadStarted();
+            await new Promise(resolve => { releasePermissionRead = resolve; });
+          }
         } else if (url.pathname.endsWith("/products")) {
           const requestedCompany = url.searchParams.get("company_id")?.replace(/^eq\./, "");
           assert.equal(requestedCompany, company, "joined-company link must not choose the first unrelated membership");
           data = [{ id: uuid(22), company_id: company, serial: "A-001", name: "Shared team product", tags: [], price: 1, revision: 1, image_path: null, deleted_at: null }];
         } else if (url.pathname.includes("/rpc/")) {
           const rpc = url.pathname.split("/").pop();
-          if (["get_company_team", "get_company_invitations", "create_employee_invite", "set_employee_active", "revoke_employee_invite"].includes(rpc) && current?.id !== users.admin.id) {
+          if (["get_company_team_permissions", "get_company_invitations", "create_employee_invite", "set_employee_active", "set_employee_product_permission", "revoke_employee_invite"].includes(rpc) && current?.id !== users.admin.id) {
             status = 403; data = { message: "Administrator access required." };
-          } else if (rpc === "get_company_team") {
+          } else if (rpc === "get_company_team_permissions") {
             assert.equal(payload.target_company, company);
-            data = [{ user_id: users.admin.id, email: users.admin.email, role: "admin", active: true }, ...(joined ? [{ user_id: users.employee.id, email: users.employee.email, role: "sales", active }] : [])];
+            data = [{ user_id: users.admin.id, email: users.admin.email, role: "admin", active: true }, ...(joined ? [{ user_id: users.employee.id, email: users.employee.email, role: "sales", active, can_manage_products: canManage }] : [])];
           } else if (rpc === "get_company_invitations") {
             data = invitations.map(({ token, ...row }) => row);
           } else if (rpc === "create_employee_invite") {
@@ -81,6 +90,10 @@ let registered = false;
           } else if (rpc === "set_employee_active") {
             assert.equal(payload.target_company, company); assert.equal(payload.employee_id, users.employee.id);
             active = payload.enabled; data = null;
+          } else if (rpc === "set_employee_product_permission") {
+            assert.equal(payload.target_company, company); assert.equal(payload.employee_id, users.employee.id);
+            if (failPermission) { failPermission = false; status = 500; data = { message: "Simulated permission save failure" }; }
+            else { canManage = payload.enabled; data = null; }
           } else if (rpc === "revoke_employee_invite") {
             invitations.find(i => i.id === payload.invitation_id).revoked_at = new Date().toISOString(); data = null;
           } else throw new Error(`Unexpected RPC ${rpc}`);
@@ -117,7 +130,6 @@ let registered = false;
     await admin.getByRole("button", { name: "复制邀请链接" }).click();
     await admin.getByRole("status").filter({ hasText: "手动全选复制" }).waitFor();
     assert(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
-    if (process.env.SALESGO_TEAM_SCREENSHOT) await admin.screenshot({ path: process.env.SALESGO_TEAM_SCREENSHOT, fullPage: true });
 
     const { page: employee } = await open();
     await employee.goto(link);
@@ -151,9 +163,50 @@ let registered = false;
     await wrong.getByRole("alert").filter({ hasText: "受邀邮箱" }).waitFor();
     assert.equal(await wrong.getByRole("button", { name: "接受邀请并加入公司" }).count(), 0);
     await admin.getByRole("button", { name: "刷新员工与邀请" }).click();
+    const permission = admin.getByRole("checkbox", { name: "employee@example.test 的产品管理权限" });
+    await permission.waitFor(); assert.equal(await permission.isChecked(), false);
+    failPermission = true;
+    await permission.click();
+    await admin.getByRole("alert").filter({ hasText: "Simulated permission save failure" }).waitFor();
+    assert.equal(await permission.isChecked(), false, "failed save must not show permission as granted");
+    await permission.click();
+    await admin.getByRole("status").filter({ hasText: "已允许此销售员管理产品" }).waitFor();
+    await admin.getByRole("button", { name: "停用权限" }).waitFor();
+    assert.equal(await permission.isChecked(), true); assert.equal(canManage, true);
+    assert(await admin.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
+    if (process.env.SALESGO_TEAM_SCREENSHOT) await admin.screenshot({ path: process.env.SALESGO_TEAM_SCREENSHOT, fullPage: true });
+    await employee.goto(base + "/cloud?company=" + company);
+    await employee.getByRole("button", { name: "查看 Shared team product 详情" }).waitFor();
+    assert.equal(await employee.getByRole("button", { name: "＋ 新增产品" }).isDisabled(), false);
+    assert.equal(await employee.getByRole("link", { name: "员工与邀请", exact: true }).count(), 0);
+    assert.equal(await employee.getByRole("button", { name: "预览本地产品导入" }).count(), 0);
+    await employee.getByRole("button", { name: "编辑 Shared team product" }).click();
+    await employee.getByRole("button", { name: "保存修改" }).waitFor();
+    holdNextPermissionRead = true;
+    const readStarted = new Promise(resolve => { permissionReadStarted = resolve; });
+    await employee.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await readStarted; // Old 'granted' response waits while a newer read revokes.
+    await permission.click();
+    await admin.getByRole("status").filter({ hasText: "已收回产品管理权限" }).waitFor();
+    await employee.evaluate(() => window.dispatchEvent(new Event("focus")));
+    await employee.getByText("你的产品权限：仅查看与分享。员工与权限设置仅限管理员。", { exact: true }).waitFor();
+    assert.equal(await employee.getByRole("button", { name: "保存修改" }).count(), 0, "revocation closes stale editor");
+    assert(await employee.getByRole("button", { name: "＋ 新增产品" }).isDisabled());
+    const lateResponse = employee.waitForResponse(response => {
+      const url = new URL(response.url());
+      return url.pathname.endsWith("/company_members") && url.searchParams.get("select") === "role,can_manage_products";
+    });
+    releasePermissionRead(); await lateResponse;
+    await employee.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assert(await employee.getByRole("button", { name: "＋ 新增产品" }).isDisabled(), "late old permission response must not restore controls");
+    await admin.getByRole("button", { name: "停用权限" }).waitFor();
     await admin.getByRole("button", { name: "停用权限" }).click();
     await admin.getByRole("button", { name: "恢复权限" }).waitFor();
     assert.equal(active, false);
+    await permission.click();
+    await admin.getByRole("status").filter({ hasText: "已允许此销售员管理产品" }).waitFor();
+    await admin.getByRole("button", { name: "恢复权限" }).waitFor();
+    assert.equal(canManage, true); assert.equal(active, false, "grant must not reactivate disabled member");
     await employee.goto(link);
     await employee.getByRole("button", { name: "确认公司访问权限" }).click();
     await employee.getByRole("alert").filter({ hasText: "已停用" }).waitFor(); assert.equal(active, false);
@@ -178,6 +231,6 @@ let registered = false;
     await admin.getByRole("link", { name: "请登录公司管理员账号并确认权限" }).waitFor();
     assert.equal(await admin.getByText(users.employee.email, { exact: true }).count(), 0);
     assert.deepEqual(errors, []);
-    console.log("PASS: mobile admin invites, lost-response retry, anonymous privacy, employee registration/navigation, explicit join, selected company, sales-only UI, wrong-email denial, disable/restore, old-link protection, revoke and logout. All Supabase calls mocked; no remote writes.");
+    console.log("PASS: mobile invitations, product permission toggle/failure, grant without admin access, revoke closes editor, inactive override, registration/join, disable/restore, link revoke and logout. All Supabase calls mocked; no remote writes.");
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });

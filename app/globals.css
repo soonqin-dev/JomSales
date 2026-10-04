@@ -862,6 +862,8 @@ form small {
 .teamRow > div { min-width: 0; overflow-wrap: anywhere; flex: 1 1 220px; }
 .teamRow p { color: var(--muted); margin: 8px 0 0; }
 .teamRow button { min-height: 44px; }
+.teamPermission { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-top: 8px; font-size: 14px; }
+.accountCard .teamPermission input { width: 20px; height: 20px; padding: 0; margin: 0; flex-shrink: 0; accent-color: var(--blue); }
 
 .quotationMessage {
   font-size: 14px;

@@ -19,6 +19,7 @@ const images = new Map();
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZHkAAAAASUVORK5CYII=", "base64");
 let failSave = false;
 let failList = false;
+let salesCanManage = false;
 const errors = [];
 
 (async () => {
@@ -38,12 +39,13 @@ const errors = [];
         const company = key === "other" ? CB : CA;
         const active = key !== "disabled";
         const admin = key === "owner" || key === "other";
+        const writer = active && (admin || (key === "sales" && salesCanManage));
         const eq = column => url.searchParams.get(column)?.replace(/^eq\./, "");
         if (url.pathname.endsWith("/token")) data = session(user);
         else if (url.pathname.endsWith("/user")) data = user;
         else if (url.pathname.endsWith("/logout")) data = {};
         else if (url.pathname.endsWith("/company_members")) {
-          data = active ? [{ company_id: company, role: admin ? "admin" : "sales", companies: { id: company, name: company === CA ? "Company A" : "Company B" } }] : [];
+          data = active ? [{ company_id: company, role: admin ? "admin" : "sales", can_manage_products: key === "sales" && salesCanManage, companies: { id: company, name: company === CA ? "Company A" : "Company B" } }] : [];
         } else if (url.pathname.endsWith("/products")) {
           if (failList && method === "GET") {
             failList = false;
@@ -54,14 +56,14 @@ const errors = [];
             const payload = request.postDataJSON();
             const item = Array.isArray(payload) ? payload[0] : payload;
             if (failSave) { failSave = false; status = 500; data = { message: "Simulated network failure" }; }
-            else if (!admin || item.company_id !== company) { status = 403; data = { message: "Permission denied" }; }
+            else if (!writer || item.company_id !== company || (!admin && item.source_key)) { status = 403; data = { message: "Permission denied" }; }
             else if (products.some(p => p.id === item.id || (!p.deleted_at && p.company_id === company && p.serial === item.serial))) { status = 409; data = { message: "Duplicate product" }; }
             else {
               const row = { ...item, revision: 1, created_at: new Date().toISOString(), deleted_at: null };
               products.unshift(row); data = [row];
             }
           } else if (method === "PATCH") {
-            data = admin ? matching.map(row => { Object.assign(row, request.postDataJSON(), { revision: row.revision + 1 }); return row; }) : [];
+            data = writer ? matching.map(row => { Object.assign(row, request.postDataJSON(), { revision: row.revision + 1 }); return row; }) : [];
           } else data = matching.slice(Number(url.searchParams.get("offset") || 0), Number(url.searchParams.get("offset") || 0) + Number(url.searchParams.get("limit") || 1000));
         } else if (url.pathname === "/storage/v1/object/sign/salesgo-products") {
           const body = request.postDataJSON(); assert.equal(body.expiresIn, 300);
@@ -129,6 +131,39 @@ const errors = [];
     await sales.getByRole("button", { name: "查看 Cloud photo product 详情" }).waitFor();
     assert(await sales.getByRole("button", { name: "＋ 新增产品" }).isDisabled());
     assert(await sales.getByRole("button", { name: "编辑 Cloud photo product" }).isDisabled());
+    salesCanManage = true;
+    await sales.getByRole("button", { name: "刷新云端产品" }).click();
+    await sales.getByRole("button", { name: "查看 Cloud photo product 详情" }).waitFor();
+    assert.equal(await sales.getByRole("button", { name: "＋ 新增产品" }).isDisabled(), false);
+    assert.equal(await sales.getByRole("button", { name: "预览本地产品导入" }).count(), 0);
+    assert.equal(await sales.getByRole("link", { name: "员工与邀请", exact: true }).count(), 0);
+    await sales.getByRole("button", { name: "＋ 新增产品" }).click();
+    await sales.getByPlaceholder("例如 P-003").fill("SALES-NEW");
+    await sales.getByPlaceholder("例如 Sample Product C").fill("Sales managed product");
+    await sales.getByPlaceholder("0.00").fill("8.00");
+    await sales.locator("input[type=file]").setInputFiles({ name: "sales-photo.png", mimeType: "image/png", buffer: png });
+    await sales.getByAltText("预览", { exact: true }).waitFor();
+    await sales.getByRole("button", { name: "保存产品", exact: true }).click();
+    await sales.getByRole("button", { name: "查看 Sales managed product 详情" }).waitFor();
+    await sales.getByRole("button", { name: "编辑 Sales managed product" }).click();
+    await sales.getByPlaceholder("例如 Sample Product C").fill("Sales edited product");
+    await sales.getByRole("button", { name: "保存修改" }).click();
+    await sales.getByRole("button", { name: "查看 Sales edited product 详情" }).waitFor();
+    const salesRow = sales.locator("article").filter({ has: sales.getByRole("button", { name: "查看 Sales edited product 详情" }) });
+    await salesRow.getByRole("button", { name: "删除", exact: true }).click();
+    await sales.getByRole("status").filter({ hasText: "产品已删除" }).waitFor();
+    assert(products.find(p => p.serial === "SALES-NEW").deleted_at);
+    assert.equal(images.size, 1, "sales photo cleanup should remove its now-unused file");
+    await sales.getByRole("button", { name: "编辑 Cloud photo product" }).click();
+    salesCanManage = false; // Revoke while a stale product editor remains open.
+    await sales.getByPlaceholder("例如 Sample Product C").fill("Revoked stale edit");
+    await sales.getByRole("button", { name: "保存修改" }).click();
+    await sales.getByRole("alert").filter({ hasText: "没有权限" }).waitFor();
+    assert.equal(products.find(p => p.serial === "A-001").name, "Cloud photo product");
+    await sales.getByRole("button", { name: "取消", exact: true }).click();
+    await sales.getByRole("button", { name: "刷新云端产品" }).click();
+    await sales.getByRole("button", { name: "查看 Cloud photo product 详情" }).waitFor();
+    assert(await sales.getByRole("button", { name: "＋ 新增产品" }).isDisabled());
     const { page: disabled } = await open("disabled");
     await disabled.getByRole("alert").filter({ hasText: "权限已被停用" }).waitFor();
     assert.equal(await disabled.getByRole("button", { name: "查看 Cloud photo product 详情" }).count(), 0);
@@ -166,6 +201,6 @@ const errors = [];
     await owner.getByRole("button", { name: "查看 Local backup product 详情" }).waitFor();
     assert.equal(await owner.getByRole("button", { name: "查看 Cloud photo product 详情" }).count(), 0, "cloud rows must not pollute local catalog");
     assert.deepEqual(errors, []);
-    console.log("PASS: cloud CRUD/image upload/private image card, failure retry, backup/preview/import dedupe, local data preserved, second-device read, two-company UI, sales/disabled accounts, stale-edit rejection and soft deletion. All remote requests mocked.");
+    console.log("PASS: cloud CRUD/images/cards, authorized sales CRUD and photo cleanup, permission revoke denies stale save, admin-only import, local preservation, company isolation, disabled accounts and revision conflicts. All remote requests mocked.");
   } finally { await browser.close(); }
 })().catch(err => { console.error(err); process.exitCode = 1; });

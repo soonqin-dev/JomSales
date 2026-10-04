@@ -171,8 +171,9 @@ live database rules. Its synthetic test records are rolled back, it sends no
 emails, and it does not create or delete physical Storage files. If it fails,
 stop and inspect the error before enabling the cloud workflow.
 
-Cloud product reads require active company membership. Only admins can insert,
-update, soft-delete or import; sales can read/search/share and add local quotation
+Cloud product reads require active company membership. Admins and explicitly
+authorized sales members can insert, update and soft-delete; bulk import remains
+admin-only. All active sales members can read/search/share and add local quotation
 lines. Ownership, import keys and revision metadata are not writable by API
 clients. A revision check prevents overwriting a newer device's edit. Other
 devices see changes on refresh (not realtime). Cloud failures never silently
@@ -263,6 +264,39 @@ isolated mobile invitation/team acceptance (same Playwright environment variable
 as the cloud browser test). It mocks all Supabase requests and tests manual-link
 generation/retry, employee registration and explicit join, multi-company routing,
 wrong-email denial, stop/restore, old-link protection, revoke and logout.
+
+## Grouped sales product-management permission
+
+Apply ONLY `supabase/migrations/202610040003_product_management_permission.sql`
+once as postgres after the three earlier migrations. Run the new verification
+`supabase/tests/product_management_permission.sql` separately before pushing the
+UI. It rolls back every synthetic record and does not create/remove Storage files.
+The migration adds `company_members.can_manage_products boolean not null default
+false`: existing and newly invited sales members remain read-only unless an admin
+explicitly grants permission. Admins retain full product access by role.
+
+On `/team`, each sales member has ONE **产品管理（新增、编辑、删除）** checkbox.
+Only a current company's active admin can change it via a restricted RPC. The
+flag is company/member scoped, never promotes the sales member to admin and never
+grants team, invitations, permission settings or billing access. Members still
+cannot directly update their membership, role or this flag through the Data API.
+The previous roster RPC is retained for old-client compatibility; the new UI uses
+`get_company_team_permissions` to include the permission flag.
+
+Product INSERT/UPDATE (including soft deletion) and image upload/unused-image
+cleanup RLS all require an active admin or authorized sales member. Read policies,
+immutable metadata, revision conflict checks, private bucket and no-overwrite/live
+image protection are retained. Bulk import stays admin-only both in the UI and
+the database (sales inserts require `source_key is null`).
+
+Revoking this flag removes write access on subsequent database/storage requests,
+not read/search/share access. Stopping company access overrides the flag entirely;
+admins can configure the stored flag while a member is stopped, but it does not
+reactivate them. Restoring company access applies their currently saved flag.
+The cloud UI rechecks membership/permission on refresh, focus and every two minutes;
+a changed capability closes any open editor. Even before UI refresh, RLS denies
+new unauthorized writes. Local browser product editing is unrelated to company
+permissions, and completed downloads/shares cannot be revoked.
 
 This is a catalog and quotation tool;
 inventory, POS checkout, payments, invoices, accounting, and ERP are out of scope.
