@@ -38,7 +38,6 @@ rather than creating another company.
 | `/quotations` | Reopen saved quotes, start new quote | Sales: own; admin: company-wide |
 | `/brand` | Company name, contact, Logo | Company admin |
 | `/team` | Invitations, disable/restore, grouped product permission | Company admin |
-| `/migration` | Explicit legacy preview, backup and import | Company admin |
 
 Server pages and proxy validate Auth using `getUser()`, never trusting a cookie's
 embedded user. Cookie refresh is forwarded to SSR and browser, including redirects.
@@ -48,18 +47,10 @@ authentication state, not business-data storage.
 
 ## Rollout for the current installation
 
-The earlier four migrations are already applied. Do NOT rerun them.
-
-1. Run ONLY `supabase/migrations/202610040004_cloud_only_workspace.sql` once as
-   postgres in SQL Editor, before deploying this client.
-2. Require `quotations.row_security_enabled=true`; `salesgo-branding` must show
-   `public=false`, `file_size_limit=1048576`.
-3. Separately run `supabase/tests/cloud_only_workspace.sql` and require `PASS`.
-   Stop on an SQL error and inspect it before continuing.
-4. Push the tested commit via GitHub Desktop; verify Vercel Production Ready
-   matches that commit, then test login and cross-device workflows on real phones.
-5. If needed, use `/migration` on the old browser/domain. Download its backup,
-   verify the target company, then explicitly confirm import.
+All five migrations and cloud-only verification have already been applied for
+the current installation. Do NOT rerun them. Removing the legacy browser-import
+feature requires NO new SQL: push the tested commit via GitHub Desktop, verify
+Vercel Production Ready matches it, then test the cloud workflows on real phones.
 
 The new migration preserves users/products/memberships/permissions, adding quotes,
 company branding and a private 1MB Logo bucket. It does not delete physical files
@@ -115,25 +106,16 @@ JPG cards include photo, full text, price and the current company brand. Native
 file sharing to WhatsApp remains supported; download the JPG/PDF and attach it
 manually if unavailable. Actual delivery and device compatibility need real phones.
 
-## Legacy preservation
+## Cloud-only data source
 
-ONLY `/migration`, after explicit admin preview, reads the following keys:
-
-| Preferred key | Old fallback |
-| --- | --- |
-| `salesgo_catalog_v1` | `autoparts_catalog_vercel_demo_v1` |
-| `salesgo_quotation_v1` | `autoparts_quotation_v1` |
-| `salesgo_quotation_details_v1` | `autoparts_quotation_details_v1` |
-
-Reads never write/copy/delete browser keys. Preferred keys, including empty arrays,
-take precedence. Corrupt data errors instead of overwriting originals. Backup to
-JSON first. Same-source products/quotes deduplicate on retries; conflicting codes
-do not overwrite cloud products. Old quote belongs to the importing admin. Missing
-old quote metadata gets the documented date `2000-01-01` and a legacy number,
-editable afterwards. Brand replacement is opt-in and confirmed; otherwise current
-cloud brand is retained and stamped into the imported quote. Originals remain in
-the browser profile and may still be inspected outside the app by someone with
-profile access. Another domain/protocol/port cannot read these keys.
+The legacy browser-import page, navigation and readers have been removed. Old
+`/migration` bookmarks redirect authenticated users to their company cloud
+workspace (anonymous users must log in); they cannot preview/import browser data.
+Application code does not read/write/clear LocalStorage business records.
+Previously uploaded products, quotations and original import metadata stay intact
+in Supabase; no SQL, cloud records or physical files are removed by this change.
+Any old browser originals are left untouched, unused by SalesGo. A person with
+access to that browser profile could still inspect them outside the app.
 
 ## Tests
 
@@ -144,7 +126,7 @@ npm run check:supabase
 ```
 
 Unit/service tests cover upload fallback, pagination, lost responses, stale saves
-and migration identity. PGlite runs the actual migrations and verification SQL
+and absence of local business-data readers/writers. PGlite runs the actual migrations and verification SQL
 with Auth/Storage schema stubs, including company isolation, own/admin quotations,
 disabled/anonymous access and historical Logo retention.
 
@@ -160,7 +142,7 @@ It starts a local API double on 54329, builds with test-only env values and runs
 an isolated production server on 54330. BOTH SSR/proxy and browser Auth call the
 double; no live Supabase writes occur. It covers login guards, cross-device quotes,
 JPG/PDF exports with private Logo, failed/stale save retention, company/role access,
-legacy backup/deduplication and permission removal. Afterwards `.next` still holds
+retired-route redirects, ignored browser data and permission removal. Afterwards `.next` still holds
 test env values: rerun normal `npm run build` before local production use. The
 old `test-cloud-browser.cjs` and `test-team-browser.cjs` harnesses are historical
 pre-SSR tests, superseded by this harness. Live migration, Vercel and physical

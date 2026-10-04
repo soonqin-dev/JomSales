@@ -100,7 +100,7 @@ export default function AccountPage() {
   return <main className="page accountPage">
     <Link href="/">← 返回产品目录</Link>
     <h1>SalesGo 公司账号</h1>
-    <div className="notice">SalesGo 需先登录并创建或加入公司。产品、报价、客户资料与公司品牌统一保存到公司云端；旧浏览器资料只供管理员主动迁移。</div>
+    <div className="notice">SalesGo 需先登录并创建或加入公司。产品、报价、客户资料与公司品牌统一保存到公司云端。</div>
     {hasInvite && <p className="notice">你正在接受员工邀请，请使用受邀邮箱注册／登录，无需创建公司。<Link href="/join">返回邀请并确认加入 →</Link></p>}
     {error && <p className="accountError" role="alert">{error}</p>}
     {message && <p className="notice" role="status">{message}</p>}

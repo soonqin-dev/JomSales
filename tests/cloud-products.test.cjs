@@ -8,7 +8,7 @@ const crypto = require("node:crypto").webcrypto;
 const utilities = readFileSync(join(__dirname, "../app/quotation-utils.js"), "utf8").replace(/export /g, "");
 const source = readFileSync(join(__dirname, "../lib/supabase/products.js"), "utf8").replace(/^import .*;\r?\n/m, "").replace(/export /g, "");
 const context = vm.createContext({ crypto, TextEncoder, fetch, Blob, Map, Set });
-vm.runInContext(utilities + "\n" + source + "\nglobalThis.api = { productFields, signedProducts, readProducts, saveProduct, deleteProduct, importProduct };", context);
+vm.runInContext(utilities + "\n" + source + "\nglobalThis.api = { productFields, signedProducts, readProducts, saveProduct, deleteProduct };", context);
 const api = context.api;
 const COMPANY = "10000000-0000-4000-a000-000000000001";
 const base = { id: "10000000-0000-4000-a000-000000000002", serial: "P-1", name: "Product", tags: [], price: "10.00", image: "" };
@@ -83,16 +83,13 @@ test("catalog paging and bounded short-lived signing do not truncate products", 
   assert(signed[0].imageError); assert.equal(signed[0].image, "");
 });
 
-test("import skips tombstones, handles a lost successful response, and uses a stable per-company ID", async () => {
-  const existing = client({ existing: [{ ...base, company_id: COMPANY, source_key: base.id, deleted_at: "2026-10-04" }] });
-  assert.equal(await api.importProduct(existing.instance, COMPANY, base), "skipped");
-  assert.equal(existing.uploads.length, 0);
-  const lost = client({ lostReply: true });
-  assert.equal(await api.importProduct(lost.instance, COMPANY, base), "skipped");
-  const first = client(), second = client();
-  await api.importProduct(first.instance, COMPANY, base); await api.importProduct(second.instance, COMPANY, base);
-  assert.equal(first.rows[0].id, second.rows[0].id);
-  assert.equal(first.rows[0].source_key, base.id);
+test("new cloud products have no legacy source; editing preserves existing imported metadata", async () => {
+  const fresh = client(); await api.saveProduct(fresh.instance, COMPANY, base);
+  assert.equal(fresh.rows[0].source_key, null);
+  const previous = { ...base, source_key: "existing-cloud-source", revision: 1 };
+  const existing = client({ existing: [previous] });
+  const saved = await api.saveProduct(existing.instance, COMPANY, { ...base, name: "Edited" }, previous);
+  assert.equal(saved.row.source_key, "existing-cloud-source");
 });
 
 test("delete is soft, clears the photo reference before cleanup, and checks stale revision", async () => {

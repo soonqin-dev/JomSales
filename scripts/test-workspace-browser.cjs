@@ -63,11 +63,13 @@ async function build(){await new Promise((resolve,reject)=>{const p=spawn(proces
     const other=await open("other");await other.page.getByRole("button",{name:"查看 Company B only 详情"}).waitFor();assert(!await other.page.getByRole("button",{name:"查看 Cloud Widget 详情"}).count());
     await other.page.goto(`${base}/cloud?company=${fixture.CA}&quote=${quoteId}`);await other.page.getByText(/你尚未加入公司/).first().waitFor();assert(!await other.page.getByLabel("客户名称 *",{exact:true}).count());
     await page.goto(base+"/quotations");await page.getByRole("link",{name:"打开 / 修改报价"}).first().waitFor();assert.equal(await page.getByRole("link",{name:"打开 / 修改报价"}).count(),2);console.log("PASS own/admin quotation lists and separate companies");
-    await page.goto(base+"/migration");await page.getByRole("button",{name:"读取并预览旧资料",exact:true}).click();await page.getByRole("button",{name:"确认导入公司云端",exact:true}).waitFor();
-    const backupEvent=page.waitForEvent("download");await page.getByRole("button",{name:"下载旧资料备份",exact:true}).click();assert((await backupEvent).suggestedFilename().endsWith(".json"));
-    await page.getByRole("button",{name:"确认导入公司云端",exact:true}).click();await page.getByText(/导入完成：新增 2，跳过 0/).waitFor();
-    await page.getByRole("button",{name:"确认导入公司云端",exact:true}).click();await page.getByText(/导入完成：新增 0，跳过 2/).waitFor();
-    assert.equal(fixture.companies[0].name,"Cloud Brand");assert.deepEqual(await page.evaluate(()=>Object.fromEntries(Object.keys(localStorage).filter(k=>k.startsWith("salesgo_")).map(k=>[k,JSON.parse(localStorage.getItem(k))]))),legacy);console.log("PASS explicit legacy import/backup, deduplication and untouched original data");
+    const cloudBefore=JSON.stringify({products:fixture.products,quotations:fixture.quotations,companies:fixture.companies});
+    await page.goto(`${base}/migration?company=${fixture.CA}`);await page.waitForURL(`${base}/cloud?company=${fixture.CA}`);await page.getByRole("button",{name:"查看 Cloud Widget 详情"}).waitFor();
+    assert(!await page.getByRole("link",{name:"迁移旧浏览器资料",exact:true}).count());assert(!await page.getByRole("button",{name:"读取并预览旧资料",exact:true}).count());assert(!await page.getByText("Old Local Product",{exact:true}).count());
+    assert.deepEqual(await page.evaluate(()=>Object.fromEntries(Object.keys(localStorage).filter(k=>k.startsWith("salesgo_")).map(k=>[k,JSON.parse(localStorage.getItem(k))]))),legacy);
+    assert.equal(JSON.stringify({products:fixture.products,quotations:fixture.quotations,companies:fixture.companies}),cloudBefore);
+    await page.goto(base+"/migration?company=https%3A%2F%2Fexample.test");await page.waitForURL(base+"/cloud");
+    console.log("PASS retired migration redirects safely, no legacy reads/import and unchanged cloud/original records");
     await sales.page.goto(base+"/cloud");fixture.members.find(m=>m.user_id===fixture.users.sales.id).can_manage_products=true;await sales.page.evaluate(()=>window.dispatchEvent(new Event("focus")));
     await sales.page.getByRole("button",{name:"＋ 新增产品",exact:true}).waitFor();await sales.page.waitForFunction(()=>!document.querySelector(".addButton")?.disabled);await sales.page.getByRole("button",{name:"＋ 新增产品",exact:true}).click();
     fixture.members.find(m=>m.user_id===fixture.users.sales.id).can_manage_products=false;await sales.page.evaluate(()=>window.dispatchEvent(new Event("focus")));await sales.page.locator(".overlay").waitFor({state:"detached"});

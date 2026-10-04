@@ -125,8 +125,8 @@ export default function CloudCatalogPage() {
     return () => { ++generation.current; clearTimeout(timer); clearInterval(interval); subscription?.unsubscribe(); window.removeEventListener("focus", verify); };
   }, []);
 
-  async function operation(task, adminOnly = false) {
-    if (working.current || !verified || !context || !canManageProducts(context) || (adminOnly && context.role !== "admin")) throw new Error("当前没有可用的产品管理权限。请刷新确认；批量导入仍仅限管理员。");
+  async function operation(task) {
+    if (working.current || !verified || !context || !canManageProducts(context)) throw new Error("当前没有可用的产品管理权限，请刷新确认。");
     working.current = true; setBusy(true); setError(""); setMessage("正在保存到云端…");
     const version = generation.current;
     try { return await task(createClient(), context, version); }
@@ -173,7 +173,6 @@ export default function CloudCatalogPage() {
         {context && <Link href={`/quotations?company=${context.companyId}`}>已保存报价</Link>}
         {context?.role === "admin" && <Link href={`/team?company=${context.companyId}`}>员工与邀请</Link>}
         {context?.role === "admin" && <Link href={`/brand?company=${context.companyId}`}>公司品牌</Link>}
-        {context?.role === "admin" && <Link href={`/migration?company=${context.companyId}`}>迁移旧浏览器资料</Link>}
       </div>
       {loading && <p role="status">正在读取云端产品…</p>}
       {!loading && !context && !error && <p><Link href="/account">请先登录并创建或加入公司</Link></p>}

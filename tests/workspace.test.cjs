@@ -1,12 +1,12 @@
 const { test } = require("node:test");
 const assert = require("node:assert/strict");
 const vm = require("node:vm");
-const { readFileSync } = require("node:fs");
+const { readFileSync, readdirSync, existsSync } = require("node:fs");
 const { join } = require("node:path");
 const crypto = require("node:crypto").webcrypto;
 const source = file => readFileSync(join(__dirname,"..",file),"utf8").replace(/^import .*;\r?\n/gm,"").replace(/export /g,"");
 const context = vm.createContext({ crypto, TextEncoder, fetch, Blob, Set });
-vm.runInContext(source("app/quotation-utils.js")+"\n"+source("lib/supabase/workspace.js")+"\n"+source("lib/supabase/migration.js")+"\nglobalThis.api={quotePayload,saveQuotation,readQuotation,listQuotations,saveBrand,signedBrand,newDraft,legacyQuoteIdentity};", context);
+vm.runInContext(source("app/quotation-utils.js")+"\n"+source("lib/supabase/workspace.js")+"\nglobalThis.api={quotePayload,saveQuotation,readQuotation,listQuotations,saveBrand,signedBrand,newDraft};", context);
 const api = context.api;
 const scope = {companyId:"40000000-0000-4000-a000-000000000010",userId:"40000000-0000-4000-a000-000000000001"};
 const brand={id:scope.companyId,name:"Company A",contact:"Phone",logo_path:null,logo:"",brand_revision:1};
@@ -35,11 +35,6 @@ test("quotation save recovers only identical committed lost replies and rejects 
   await assert.rejects(api.saveQuotation(stale.client,scope,{...result,details:{...result.details,notes:"stale"}}),/其他设备修改/);
   assert.equal(stale.rows[0].notes,"newer edit");
 });
-test("legacy quotation identity is stable per company/user/payload and never cross-company",async()=>{
-  const a=await api.legacyQuoteIdentity(scope,draft()),b=await api.legacyQuoteIdentity(scope,draft());assert.equal(a.id,b.id);
-  assert.notEqual(a.id,(await api.legacyQuoteIdentity({...scope,companyId:"other"},draft())).id);
-  const changed=draft();changed.details.phone="changed";assert.notEqual(a.sourceKey,(await api.legacyQuoteIdentity(scope,changed)).sourceKey);
-});
 test("history pagination continues beyond 500 and signed branding failures are explicit",async()=>{
   const m=mock({signError:true});m.rows.push(...Array.from({length:1001},(_,id)=>({id})));
   assert.equal((await api.listQuotations(m.client,scope.companyId)).length,1001);assert.equal(m.ranges.length,3);
@@ -52,7 +47,14 @@ test("branding preserves broken referenced logos unless explicitly removed, neve
   const failed=mock({brandError:true});await assert.rejects(api.saveBrand(failed.client,brand,{...brand,logo:"data:image/png;base64,aGVsbG8="}),/保存未确认/);
   assert.equal(failed.uploads[0].options.upsert,false);assert.equal(failed.removed[0],failed.uploads[0].path);
 });
-test("business storage is read-only and is imported exclusively by migration screen",()=>{
-  const file=readFileSync(join(__dirname,"../app/storage.js"),"utf8"); assert(!/localStorage\.(setItem|removeItem|clear)/.test(file));
-  for(const file of ["app/Catalog.js","app/Quotation.js","app/cloud/CloudCatalog.js","app/use-cloud-quotation.js"]) assert(!/localStorage|from ["']\.\.?\/storage/.test(readFileSync(join(__dirname,"..",file),"utf8").replace(/\/\*.*?\*\//gs,"")));
+test("no application code reads/writes local business storage and migration implementation is removed",()=>{
+  function inspect(dir) {
+    for(const entry of readdirSync(dir,{withFileTypes:true})) {
+      const file=join(dir,entry.name);
+      if(entry.isDirectory())inspect(file);
+      else if(entry.name.endsWith(".js"))assert(!/\blocalStorage\b|readStoredJson/.test(readFileSync(file,"utf8").replace(/\/\*.*?\*\//gs,"").replace(/^\s*\/\/.*$/gm,"")),file);
+    }
+  }
+  for(const dir of ["app","lib"])inspect(join(__dirname,"..",dir));
+  for(const file of ["app/storage.js","app/migration/Migration.js","lib/supabase/migration.js"]) assert(!existsSync(join(__dirname,"..",file)));
 });
