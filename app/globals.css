@@ -17,6 +17,9 @@
 .accountCard button[type="submit"], .accountTabs button[aria-pressed="true"] { background: #2563eb; color: white; }
 .accountCard button:disabled { opacity: .55; cursor: wait; }
 .accountTabs { display: flex; flex-wrap: wrap; gap: 10px; }
+.accountPage > button, .accountPage select { padding: 12px; min-height: 44px; max-width: 100%; border: 1px solid #d1d5db; border-radius: 8px; background: white; font: inherit; }
+.accountPage > button:disabled { opacity: .55; cursor: wait; }
+.accountCard + .accountCard { margin-top: 16px; }
 .accountError { color: #991b1b; background: #fee2e2; padding: 12px; border-radius: 8px; overflow-wrap: anywhere; }
 .accountCard p { line-height: 1.6; overflow-wrap: anywhere; }
 
@@ -845,6 +848,20 @@ form small {
 .pdfActions {
   margin-top: 12px;
 }
+
+.teamRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--border);
+  padding: 16px 0;
+}
+
+.teamRow > div { min-width: 0; overflow-wrap: anywhere; flex: 1 1 220px; }
+.teamRow p { color: var(--muted); margin: 8px 0 0; }
+.teamRow button { min-height: 44px; }
 
 .quotationMessage {
   font-size: 14px;

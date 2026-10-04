@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
+import { pendingInvite } from "../../lib/supabase/invitations";
 
 export default function AccountPage() {
   const [user, setUser] = useState(null);
@@ -16,6 +17,7 @@ export default function AccountPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [hasInvite, setHasInvite] = useState(false);
   const revision = useRef(0);
 
   async function refresh() {
@@ -47,6 +49,7 @@ export default function AccountPage() {
   useEffect(() => {
     let subscription;
     let timer;
+    try { setHasInvite(!!pendingInvite()); } catch { /* Auth still works if browser storage is blocked. */ }
     try {
       subscription = createClient().auth.onAuthStateChange(() => {
         clearTimeout(timer);
@@ -88,7 +91,7 @@ export default function AccountPage() {
       if (mode === "register" && !result.data.session) {
         setMessage("注册申请已提交。请检查邮箱（包括垃圾邮件），验证后回来登录。如邮箱已注册，请直接登录。");
       } else {
-        setMessage("登录成功。现有产品与报价仍保存在本机。");
+        setMessage("登录成功，可进入公司云端产品。本地产品与报价不会自动同步。");
         await refresh();
       }
     });
@@ -98,6 +101,7 @@ export default function AccountPage() {
     <Link href="/">← 返回产品目录</Link>
     <h1>SalesGo 公司账号</h1>
     <div className="notice">公司云端产品与本地产品分开使用。报价和报价品牌仍保存在此浏览器，尚未云端同步。退出登录不会删除本地资料；共用设备上的其他使用者仍可能看到本地资料。</div>
+    {hasInvite && <p className="notice">你正在接受员工邀请，请使用受邀邮箱注册／登录，无需创建公司。<Link href="/join">返回邀请并确认加入 →</Link></p>}
     {error && <p className="accountError" role="alert">{error}</p>}
     {message && <p className="notice" role="status">{message}</p>}
     {loading ? <p role="status">正在读取账号…</p> : user ? <section className="accountCard">
@@ -107,10 +111,11 @@ export default function AccountPage() {
         {memberships.map(member => <div className="notice" key={member.company_id}>
           <strong>{member.companies?.name || "公司资料暂不可用"}</strong>
           <p>角色：{member.role === "admin" ? "管理员" : "销售员"}</p>
+          <p><Link href={`/cloud?company=${member.company_id}`}>进入此公司云端产品 →</Link></p>
+          {member.role === "admin" && <p><Link href={`/team?company=${member.company_id}`}>员工与邀请 →</Link></p>}
         </div>)}
         <p><Link href="/cloud">进入公司云端产品 →</Link></p>
-        <p>员工邀请尚未开放。</p>
-      </> : <form onSubmit={event => {
+      </> : hasInvite ? <p>请返回邀请页面确认加入公司。</p> : <form onSubmit={event => {
         event.preventDefault();
         void perform(async client => {
           const { error: rpcError } = await client.rpc("create_company", { company_name: companyName.trim() });
@@ -136,7 +141,7 @@ export default function AccountPage() {
     </section> : <section className="accountCard">
       <div className="accountTabs">
         <button aria-pressed={mode === "login"} disabled={busy} onClick={() => { setMode("login"); setError(""); setMessage(""); }}>登录</button>
-        <button aria-pressed={mode === "register"} disabled={busy} onClick={() => { setMode("register"); setError(""); setMessage(""); }}>注册管理员账号</button>
+        <button aria-pressed={mode === "register"} disabled={busy} onClick={() => { setMode("register"); setError(""); setMessage(""); }}>{hasInvite ? "注册员工账号" : "注册管理员账号"}</button>
       </div>
       <form onSubmit={submitAuth}>
         <label htmlFor="account-email">邮箱</label>

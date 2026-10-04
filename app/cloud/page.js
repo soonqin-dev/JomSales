@@ -38,7 +38,7 @@ export default function CloudCatalogPage() {
       const result = await client.from("company_members").select("company_id,role,companies(id,name)")
         .eq("user_id", auth.data.user.id).eq("active", true);
       if (result.error) throw result.error;
-      const companyId = requestedCompany || scope.current?.companyId || result.data?.[0]?.company_id;
+      const companyId = requestedCompany || scope.current?.companyId || new URLSearchParams(window.location.search).get("company") || result.data?.[0]?.company_id;
       const member = result.data?.find(m => m.company_id === companyId);
       if (!member?.companies) throw new Error("你尚未加入公司，或公司权限已被停用。请到公司账号页确认。");
       const products = await readProducts(client, companyId);
@@ -187,6 +187,7 @@ export default function CloudCatalogPage() {
       <div className="cloudButtons">
         <button disabled={busy || loading} onClick={() => void load()}>刷新云端产品</button>
         <Link href="/account">公司账号</Link>
+        {context?.role === "admin" && <Link href={`/team?company=${context.companyId}`}>员工与邀请</Link>}
       </div>
       {loading && <p role="status">正在读取云端产品…</p>}
       {!loading && !context && !error && <p><Link href="/account">请先登录并创建或加入公司</Link></p>}

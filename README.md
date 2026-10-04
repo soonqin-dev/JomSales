@@ -156,8 +156,8 @@ routes with cookies. Company reads and creation are authorized by Supabase Auth,
 table grants, RLS, and the limited `create_company` RPC, not UI state. No secret
 key is used. Each account can create one company; repeated requests return the
 existing company without reactivating a disabled membership. Members can read
-their own active membership and its company only. Invitations, roster management,
-company editing, password recovery, quotas, and billing are not implemented yet.
+their own active membership and its company only. Company editing, password
+recovery, quotas, and billing are not implemented yet.
 
 The home route remains the local catalog. `/cloud` is the separate company
 catalog, also linked from the account page. Apply the NEW migration
@@ -200,7 +200,7 @@ Local products, quotation drafts and quotation branding remain in LocalStorage
 and are not partitioned by signed-in user. Sign-out does not erase these records;
 do not treat shared-device local data as private company data. Cloud product cards
 use the active company's name, while quotations still use manually entered local
-branding. Cloud quotations, cloud branding/logo, invitations, offline editing,
+branding. Cloud quotations, cloud branding/logo, offline editing,
 quotas, and realtime updates are separate future work.
 
 Optional browser acceptance: start the production server, then run
@@ -215,6 +215,54 @@ and confirmation that an unauthenticated public bucket URL cannot display images
 
 Any future server-protected pages will also need server session validation and
 session refresh middleware before deployment.
+
+## Employee invitations and access management
+
+Apply ONLY `supabase/migrations/202610040002_employee_invitations.sql` once as
+postgres, after the two earlier migrations. It adds an RLS-enabled invitation
+table and limited RPCs without changing existing companies, members or products.
+Run `supabase/tests/employee_invitations.sql` separately: it uses synthetic users,
+rolls back all test records, sends no email, and touches no physical Storage files.
+Do not push/deploy the new pages until the migration and verification succeed.
+
+Admin account/company-cloud pages link to `/team`. Admins can list their company's
+member emails, generate a link for a specified employee email, revoke pending
+invites, and stop/restore sales-member access. They cannot disable themselves or
+other admins, promote sales to admin, or invite an existing (even disabled) member
+to bypass the access-management workflow. Disabled users remain registered but
+have no new company product/image requests authorized. Cached content/downloads
+cannot be recalled; signed image URLs remain usable until their five-minute expiry.
+
+Links are sent **manually** by the admin through WhatsApp/email; automatic email
+sending is not configured. Links contain 256-bit cryptographically random tokens
+in the URL fragment (`/join#token=...`), expire after seven days, and are bound to
+the verified email in `auth.users`, never user-editable metadata/JWT email claims.
+Only a SHA-256 token hash is saved in the database; roster/invite RPCs never return
+tokens/hashes. Generating a new invite for an email revokes its earlier pending
+links. A link is displayed once and cannot be recovered after leaving the page.
+Create/accept retries are idempotent; accepting an old link cannot reactivate a
+disabled membership. The API denies anonymous preview and acceptance, preventing
+company/email information from being exposed by a link alone.
+
+The employee opens the link, registers/logs in with the invited email, verifies
+their email, returns to the invite and explicitly accepts it. `/account` shows
+employee-registration wording and hides company creation while an invite is
+pending. The pending token stays in sessionStorage for that tab only, not in
+LocalStorage or server query strings. Use the original tab or reopen the original
+invite after verification in another browser/tab. Auth redirects remain exactly
+`/auth/callback`; no additional Supabase redirect URL or secret key is required.
+Joining does not upload/delete local products or quotation drafts. A user can be
+invited to multiple companies; links to cloud/team explicitly select the company.
+
+`npm test` runs the SQL Editor verification script unmodified in local PostgreSQL
+(PGlite), with Auth/Storage platform schemas stubbed, as well as token/URL tests.
+This is not a substitute for running the script in the real Supabase project.
+
+Run `node scripts/test-team-browser.cjs` against the local production server for
+isolated mobile invitation/team acceptance (same Playwright environment variables
+as the cloud browser test). It mocks all Supabase requests and tests manual-link
+generation/retry, employee registration and explicit join, multi-company routing,
+wrong-email denial, stop/restore, old-link protection, revoke and logout.
 
 This is a catalog and quotation tool;
 inventory, POS checkout, payments, invoices, accounting, and ERP are out of scope.
