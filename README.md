@@ -1,9 +1,8 @@
 # SalesGo
 
 Mobile-first company catalog, product cards and quotations. Login is mandatory;
-business records are stored in company cloud, not LocalStorage. The interface
-uses a shared mobile-first monochrome design system adapted from the SalesGo
-Figma file. See `docs/design-system.md` for components, assets and UI checks.
+business records are stored in company cloud, not LocalStorage. Visual layout
+will be designed separately from this functional foundation.
 
 ## Local setup
 

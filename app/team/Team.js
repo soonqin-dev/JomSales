@@ -1,5 +1,4 @@
 "use client";
-import { NavLink, PageHeader } from "../ui";
 
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
@@ -117,9 +116,9 @@ export default function TeamPage() {
   }
 
   return <main className="page accountPage">
-    <PageHeader title="员工与邀请" subtitle="邀请成员，管理公司访问与产品权限" icon="profile" />
-    <NavLink href="/account">← 公司账号</NavLink>
-    <p className="notice">每位员工使用自己的邮箱登录。销售员默认只可查阅和分享，可单独授权产品管理（新增、编辑、删除），不会变成管理员。报价统一保存在公司云端。停用会撤销全部公司访问权限，但不删除产品，也不能收回已经下载或分享的资料。</p>
+    <Link href="/account">← 公司账号</Link>
+    <h1>员工与邀请</h1>
+    <p className="notice">每位员工使用自己的邮箱登录。销售员默认只可查阅和分享，可单独授权产品管理（新增、编辑、删除），不会变成管理员。报价目前仍保存在各自浏览器。停用会撤销全部公司访问权限，但不删除产品，也不能收回已经下载或分享的资料。</p>
     <button disabled={busy || loading} onClick={() => void load()}>刷新员工与邀请</button>
     {loading && <p role="status">正在读取员工资料…</p>}
     {error && <p className="accountError" role="alert">{error}</p>}
@@ -130,7 +129,7 @@ export default function TeamPage() {
       {context.companies.length > 1 && <label>当前公司 <select value={context.companyId} disabled={busy || loading} onChange={e => void load(e.target.value)}>
         {context.companies.map(m => <option key={m.company_id} value={m.company_id}>{m.companies.name}</option>)}
       </select></label>}
-      <section className="accountCard" id="invite">
+      <section className="accountCard">
         <h2>邀请销售员</h2>
         <form onSubmit={generate}>
           <label htmlFor="invite-email">员工邮箱</label>

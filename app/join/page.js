@@ -4,7 +4,6 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
 import { captureInvite, INVITE_KEY, teamError } from "../../lib/supabase/invitations";
-import { NavLink, PageHeader } from "../ui";
 
 export default function JoinPage() {
   const [user, setUser] = useState(null);
@@ -75,8 +74,8 @@ export default function JoinPage() {
   }
 
   return <main className="page accountPage">
-    <PageHeader title="加入公司" subtitle="使用受邀邮箱，安全加入你的团队" icon="profile" />
-    <NavLink href="/account">← 公司账号</NavLink>
+    <Link href="/account">← 公司账号</Link>
+    <h1>加入公司</h1>
     <p className="notice">加入后使用该公司的云端产品和自己的云端报价。公司资料不会保存到浏览器作为本地数据库。</p>
     {loading && <p role="status">正在检查邀请…</p>}
     {error && <p className="accountError" role="alert">{error}</p>}

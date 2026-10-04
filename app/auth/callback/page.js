@@ -1,9 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createClient } from "../../../lib/supabase/client";
 import { pendingInvite } from "../../../lib/supabase/invitations";
-import { NavLink, PageHeader, Status } from "../../ui";
 
 export default function AuthCallback() {
   const [message, setMessage] = useState("正在确认邮箱验证结果…");
@@ -27,7 +27,7 @@ export default function AuthCallback() {
     void finish();
     return () => { cancelled = true; };
   }, []);
-  return <main className="page accountPage"><PageHeader title="邮箱验证" subtitle="确认你的 SalesGo 账号" icon="profile" />
-    <Status>{message}</Status><NavLink href="/account">返回账号页</NavLink>
+  return <main className="page accountPage"><h1>邮箱验证</h1>
+    <p role="status">{message}</p><Link href="/account">返回账号页</Link>
   </main>;
 }
