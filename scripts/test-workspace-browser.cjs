@@ -1,14 +1,15 @@
 // Production UI against a LOCAL API double. No live Supabase writes.
-// Run npm run build afterwards to restore production-configured .next output.
+// Fixture output stays in an isolated ignored directory; never serves real data.
 const { chromium } = require(process.env.SALESGO_PLAYWRIGHT_MODULE || "playwright");
 const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
 const { join } = require("node:path");
 const { createFixture } = require("./workspace-browser-fixture.cjs");
+const { auditUi } = require("./ui-browser-checks.cjs");
 const encode = value => Buffer.from(JSON.stringify(value)).toString("base64url");
 const fixture = createFixture(), base = "http://localhost:54330", errors = [];
 const next = join(__dirname, "../node_modules/next/dist/bin/next");
-const env = { ...process.env, NEXT_PUBLIC_SUPABASE_URL: fixture.origin, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_local_test_fixture" };
+const env = { ...process.env, SALESGO_ISOLATED_BUILD: `ui-${Date.now()}`, NEXT_PUBLIC_SUPABASE_URL: fixture.origin, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_local_test_fixture" };
 let server, browser, diagnosticPage;
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function build() {
@@ -57,16 +58,26 @@ async function build() {
       await page.locator(".activeQuotation").filter({ hasText: /正在编辑/ }).waitFor();
     }
     const anon = await open();
+    await anon.page.getByLabel("邮箱", { exact: true }).waitFor(); await auditUi(anon.page, "login");
     for (const path of ["/cloud", "/team", "/brand", "/quotations", "/migration"]) {
       await anon.page.goto(base + path); await anon.page.waitForURL("**/account"); assert(!await button(anon.page, "查看 Cloud Widget 详情").count());
     }
     console.log("PASS anonymous protected routes");
     const legacy = { salesgo_catalog_v1: [{ id: "legacy", name: "Old Local Product" }], salesgo_quotation_v1: ["old"], salesgo_quotation_details_v1: { customerName: "Legacy Client" } };
     const owner = await open("owner", legacy), page = owner.page; diagnosticPage = page;
+    await auditUi(page, "admin-catalog");
+    await button(page, "＋ 新增产品").click(); await page.locator(".productFormDialog[open]").waitFor();
+    await auditUi(page, "product-form");
+    await page.keyboard.press("Escape"); await page.locator(".productFormDialog").waitFor({ state: "detached" });
+    await button(page, "查看 Cloud Widget 详情").click(); await button(page, "下载产品卡片").waitFor();
+    await auditUi(page, "product-detail"); await button(page, "关闭产品详情").click();
+    await page.getByRole("link", { name: "员工与邀请", exact: true }).click(); await page.getByLabel("员工邮箱", { exact: true }).waitFor();
+    await auditUi(page, "team"); await page.goto(base + "/cloud"); await ready(page);
     const assertLegacy = async () => assert.deepEqual(await page.evaluate(() => Object.fromEntries(Object.keys(localStorage).filter(key => key.startsWith("salesgo_")).map(key => [key, JSON.parse(localStorage.getItem(key))]))), legacy);
     await assertLegacy(); assert(!await page.getByText("Old Local Product", { exact: true }).count());
     await page.getByRole("link", { name: "公司品牌", exact: true }).click();
     await page.getByLabel("公司名称", { exact: true }).fill("Cloud Brand"); await page.getByLabel("公司联系方式").fill("+60 cloud phone");
+    await auditUi(page, "brand");
     await page.getByLabel("公司 Logo", { exact: true }).setInputFiles({ name: "logo.png", mimeType: "image/png", buffer: fixture.png });
     await button(page, "保存公司品牌").click(); await page.getByText(/公司品牌已保存到云端/).waitFor();
     await page.getByRole("link", { name: "← 公司产品目录", exact: true }).click(); await ready(page);
@@ -74,7 +85,8 @@ async function build() {
     const jpg = page.waitForEvent("download"); await button(page, "下载产品卡片").click(); assert((await jpg).suggestedFilename().endsWith(".jpg")); await button(page, "关闭产品详情").click();
     await add(page); assert.equal(fixture.quotations.length, 0, "cart additions are memory-only"); await editor(page);
     assert(!await button(page, "保存到云端").count()); await page.getByLabel("客户名称 *", { exact: true }).fill("Cloud Client");
-    await page.getByLabel("P-001 数量", { exact: true }).fill("2"); await page.getByLabel("折扣（RM）", { exact: true }).fill("5"); await generate(page);
+    await page.getByLabel("P-001 数量", { exact: true }).fill("2"); await page.getByLabel("折扣（RM）", { exact: true }).fill("5");
+    await auditUi(page, "quotation-editor"); await generate(page);
     const quote = fixture.quotations[0], quoteId = quote.id;
     assert.equal(quote.customer_name, "Cloud Client"); assert.equal(quote.items[0].quantity, 2); assert.equal(quote.discount, "5.00");
     assert.equal(quote.status, "pending"); assert.equal(quote.creator_email, "owner@example.test"); assert.equal(quote.company_snapshot.name, "Cloud Brand");
@@ -86,7 +98,7 @@ async function build() {
     await second.page.getByLabel("备注", { exact: true }).fill("Newer device note"); await generate(second.page);
     await page.getByLabel("备注", { exact: true }).fill("Stale note"); await button(page, "生成报价 PDF").click(); await page.getByText(/报价已被其他设备修改/).first().waitFor();
     assert.equal(quote.notes, "Newer device note"); assert.equal(await page.getByLabel("备注", { exact: true }).inputValue(), "Stale note");
-    await button(page, "← 返回产品目录").click(); await button(page, "重新读取报价与品牌").click(); await ready(page); await editor(page);
+    await button(page, "← 返回产品目录").click(); await page.locator(".workspaceInfo summary").click(); await button(page, "重新读取报价与品牌").click(); await ready(page); await editor(page);
     await page.getByLabel("备注", { exact: true }).fill("Retained failed save"); fixture.state.failQuote = true;
     await button(page, "生成报价 PDF").click(); await page.getByText(/Simulated quote save failure/).first().waitFor();
     assert.equal(await page.getByLabel("备注", { exact: true }).inputValue(), "Retained failed save"); await assertLegacy();
@@ -111,6 +123,7 @@ async function build() {
     await page.evaluate(() => { window.abortShare = false; }); await button(page, "分享 PDF").click(); await page.locator(".activeQuotation").filter({ hasText: /^新报价$/ }).waitFor();
     console.log("PASS prepared share retains user activation, cancellation retains quote, success resets");
     const sales = await open("sales"); diagnosticPage = sales.page;
+    await auditUi(sales.page, "sales-catalog");
     assert(!await button(sales.page, "＋ 新增产品").count()); assert(!await button(sales.page, "编辑 Cloud Widget").count()); assert(!await sales.page.locator(".cardActions .deleteButton").count());
     for (const width of [320, 390, 844]) { await sales.page.setViewportSize({ width, height: 844 }); assert(await sales.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)); }
     await sales.page.setViewportSize({ width: 390, height: 844 }); await add(sales.page); await editor(sales.page);
@@ -126,6 +139,7 @@ async function build() {
     await button(sales.page, "恢复报价").click(); await sales.page.getByText("回收站没有符合条件的报价。", { exact: true }).waitFor();
     await button(sales.page, "返回已保存报价").click(); await sales.page.getByRole("link", { name: "选择报价", exact: true }).waitFor(); assert.equal(employeeQuote.deleted_at, null);
     await page.goto(base + "/quotations"); await page.getByText(/所属员工：sales@example.test/).waitFor(); assert.equal(await page.getByRole("link", { name: "选择报价", exact: true }).count(), 2);
+    await auditUi(page, "history");
     for (const width of [320, 390, 844]) { await page.setViewportSize({ width, height: 844 }); assert(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), `history fits ${width}px`); }
     await page.setViewportSize({ width: 390, height: 844 });
     if (process.env.SALESGO_TEST_SCREENSHOTS) await page.screenshot({ path: join(process.env.SALESGO_TEST_SCREENSHOTS, "salesgo-quotation-history-mobile.png"), fullPage: true });
@@ -141,8 +155,9 @@ async function build() {
     assert(!await page.getByRole("link", { name: "迁移旧浏览器资料", exact: true }).count()); assert.equal(JSON.stringify(fixture.quotations), cloudBefore);
     await page.goto(base + "/migration?company=https%3A%2F%2Fexample.test"); await page.waitForURL(base + "/cloud");
     await sales.page.goto(base + "/cloud"); await ready(sales.page); fixture.members.find(m => m.user_id === fixture.users.sales.id).can_manage_products = true;
-    await sales.page.evaluate(() => window.dispatchEvent(new Event("focus"))); await button(sales.page, "＋ 新增产品").waitFor(); await button(sales.page, "＋ 新增产品").click();
-    fixture.members.find(m => m.user_id === fixture.users.sales.id).can_manage_products = false; await sales.page.evaluate(() => window.dispatchEvent(new Event("focus"))); await sales.page.locator(".overlay").waitFor({ state: "detached" });
+    await sales.page.evaluate(() => window.dispatchEvent(new Event("focus"))); await button(sales.page, "＋ 新增产品").waitFor();
+    await auditUi(sales.page, "sales-plus-catalog"); await button(sales.page, "＋ 新增产品").click();
+    fixture.members.find(m => m.user_id === fixture.users.sales.id).can_manage_products = false; await sales.page.evaluate(() => window.dispatchEvent(new Event("focus"))); await sales.page.locator(".productFormDialog").waitFor({ state: "detached" });
     assert(!await button(sales.page, "＋ 新增产品").count()); fixture.members.find(m => m.user_id === fixture.users.sales.id).active = false;
     await sales.page.evaluate(() => window.dispatchEvent(new Event("focus"))); await sales.page.getByText(/公司权限已被停用/).first().waitFor(); assert(!await button(sales.page, "查看 Cloud Widget 详情").count());
     await page.goto(base + "/account"); await button(page, "退出此设备的登录").click(); await page.getByLabel("邮箱", { exact: true }).waitFor(); await page.goto(base + "/cloud"); await page.waitForURL("**/account");

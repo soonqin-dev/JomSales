@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
 import { pendingInvite } from "../../lib/supabase/invitations";
 import { canManageProducts } from "../../lib/supabase/permissions";
+import { NavLink, PageHeader } from "../ui";
 
 export default function AccountPage() {
   const [user, setUser] = useState(null);
@@ -98,8 +99,8 @@ export default function AccountPage() {
   }
 
   return <main className="page accountPage">
-    <Link href="/">← 返回产品目录</Link>
-    <h1>SalesGo 公司账号</h1>
+    <PageHeader title="SalesGo 公司账号" subtitle={user ? "管理账号与公司工作区" : "你的产品目录与报价工作区"} icon="profile" />
+    <NavLink href="/">← 返回产品目录</NavLink>
     <div className="notice">SalesGo 需先登录并创建或加入公司。产品、报价、客户资料与公司品牌统一保存到公司云端。</div>
     {hasInvite && <p className="notice">你正在接受员工邀请，请使用受邀邮箱注册／登录，无需创建公司。<Link href="/join">返回邀请并确认加入 →</Link></p>}
     {error && <p className="accountError" role="alert">{error}</p>}

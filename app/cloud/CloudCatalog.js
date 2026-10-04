@@ -7,6 +7,7 @@ import { createClient } from "../../lib/supabase/client";
 import { readProducts, signedProducts, saveProduct, deleteProduct } from "../../lib/supabase/products";
 import useCloudQuotation from "../use-cloud-quotation";
 import { canManageProducts } from "../../lib/supabase/permissions";
+import { PageHeader, Status, Button } from "../ui";
 
 function CompanyWorkspace({ context, cloud }) {
   const quotation = useCloudQuotation(context);
@@ -52,7 +53,7 @@ export default function CloudCatalogPage() {
       }
       const products = await readProducts(client, companyId);
       if (version !== generation.current) return;
-      const next = { userId: auth.data.user.id, companyId, role: member.role, can_manage_products: member.can_manage_products === true, name: member.companies.name, memberships: result.data };
+      const next = { userId: auth.data.user.id, email: auth.data.user.email, companyId, role: member.role, can_manage_products: member.can_manage_products === true, name: member.companies.name, memberships: result.data };
       scope.current = next; setContext(next); setItems(products); setVerified(true);
     } catch (err) {
       if (version === generation.current) {
@@ -163,27 +164,15 @@ export default function CloudCatalogPage() {
   }
 
   return <>
-    <div className="cloudControls">
-      <h1>公司云端产品</h1>
-      <p>管理员和已获产品管理权限的销售员可新增、编辑、删除产品；其他销售员可查阅和分享。其他设备更新或权限变更后，请刷新读取。图片链接五分钟有效，页面会定期续期。已下载或分享的内容无法撤回。</p>
-      {context && <p className="notice">你的产品权限：{canManageProducts(context) ? "可管理（新增、编辑、删除）" : "仅查看与分享"}。员工与权限设置仅限管理员。</p>}
-      <div className="cloudButtons">
-        <button disabled={busy || loading} onClick={() => void load()}>刷新云端产品</button>
-        <Link href="/account">公司账号</Link>
-        {context && <Link href={`/quotations?company=${context.companyId}`}>已保存报价</Link>}
-        {context?.role === "admin" && <Link href={`/team?company=${context.companyId}`}>员工与邀请</Link>}
-        {context?.role === "admin" && <Link href={`/brand?company=${context.companyId}`}>公司品牌</Link>}
-      </div>
-      {loading && <p role="status">正在读取云端产品…</p>}
-      {!loading && !context && !error && <p><Link href="/account">请先登录并创建或加入公司</Link></p>}
-      {context && context.memberships.length > 1 && <label>当前公司 <select value={context.companyId} disabled={busy} onChange={e => { window.location.assign(`/cloud?company=${e.target.value}`); }}>
-        {context.memberships.map(m => <option key={m.company_id} value={m.company_id}>{m.companies?.name}</option>)}
-      </select></label>}
-      {error && <p className="accountError" role="alert">{error}</p>}
-      {message && <p role="status">{message}</p>}
-    </div>
+    {!context && <main className="page accountPage">
+      <PageHeader title="公司云端产品" subtitle="正在连接你的公司工作区" />
+      {loading && <Status>正在读取云端产品…</Status>}
+      {error && <><Status error>{error}</Status><Button disabled={loading} onClick={() => void load()}>刷新云端产品</Button></>}
+      <p><Link href="/account">公司账号</Link></p>
+    </main>}
     {context && <CompanyWorkspace key={`${context.userId}:${context.companyId}`} context={context} cloud={{
-      items, name: context.name, canManage: verified && canManageProducts(context), canWrite: verified && !loading && canManageProducts(context) && !busy, save, remove
+      items, name: context.name, canManage: verified && canManageProducts(context), canWrite: verified && !loading && canManageProducts(context) && !busy, save, remove,
+      loading, busy, error, message, refresh: () => void load()
     }} />}
   </>;
 }

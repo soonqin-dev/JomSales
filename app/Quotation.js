@@ -5,10 +5,11 @@ import Link from "next/link";
 import { MAX_QUANTITY, MAX_UNIT_PRICE, formatMoney, lineCents, moneyToCents,
   quotationTotals } from "./quotation-utils";
 import { canShareFile, downloadFile } from "./share";
+import { FloatingAction, NavLink, PageHeader, Panel, Status } from "./ui";
 const signature = (items, details, company, edits = {}) => JSON.stringify({ items, details,
   company: { name: company.name, contact: company.contact, logo_path: company.logo_path }, edits });
 
-export default function Quotation({ quotation, context, onBack, onComplete }) {
+export default function Quotation({ quotation, context, cloudError, onBack, onComplete }) {
   const { items = [], setItems, details, setDetails, company, ready, error } = quotation;
   const [edits, setEdits] = useState({});
   const [generating, setGenerating] = useState(false);
@@ -109,6 +110,7 @@ export default function Quotation({ quotation, context, onBack, onComplete }) {
 
   return (
     <main className="page quotationPage">
+      <PageHeader title="报价清单" subtitle="客户资料、产品与报价金额" />
       <div className="quotationNavigation">
         <button type="button" className="cancelButton" onClick={onBack} disabled={locked}>
           ← 返回产品目录
@@ -117,21 +119,28 @@ export default function Quotation({ quotation, context, onBack, onComplete }) {
           新建报价
         </button>
       </div>
-      <header className="quotationHeading">
-        <div className="eyebrow">SALESGO · QUOTATION</div>
-        <h1>报价清单</h1>
+      <div className="quotationHeading">
         <p className="activeQuotation">{quotation.row.revision ? `正在编辑：${details.number}` : "新报价"}</p>
-        <p>编辑产品，填写客户资料，生成报价 PDF。</p>
-      </header>
+        <NavLink href={`/quotations?company=${context.companyId}`}>已保存报价</NavLink>
+      </div>
       {error && <p className="quotationError" role="alert">{error}</p>}
-      <p role="status">{quotation.dirty ? "有未保存修改（仅在当前页面内存）。生成／分享时自动保存。" : quotation.message || "生成／分享时自动保存到公司云端。"}</p>
+      <Status error>{cloudError}</Status>
+      <Status>{quotation.dirty ? "有未保存修改（仅在当前页面内存）。生成／分享时自动保存。" : quotation.message || "生成／分享时自动保存到公司云端。"}</Status>
       {company.logoError && <p className="quotationError" role="alert">{company.logoError}</p>}
-      <Link href={`/quotations?company=${context.companyId}`}>已保存报价</Link>
 
       <form onSubmit={event => generatePdf(event)}>
         <fieldset className="quotationFields" disabled={locked}>
-          <section className="quotationSection" aria-labelledby="quotationItemsTitle">
-            <h2 id="quotationItemsTitle">产品 <span>{items.length} 项</span></h2>
+          <Panel className="quotationSection" title="客户资料" id="quotationCustomerTitle">
+            <label>客户名称 *
+              <input value={details.customerName} required maxLength={120} autoComplete="name"
+                onChange={e => updateDetails("customerName", e.target.value)} placeholder="客户或公司名称" />
+            </label>
+            <label>客户电话
+              <input type="tel" value={details.phone} maxLength={40} autoComplete="tel"
+                onChange={e => updateDetails("phone", e.target.value)} placeholder="例如 +60 12 345 6789" />
+            </label>
+          </Panel>
+          <Panel className="quotationSection" title={<>产品 <span className="badge">{items.length} 项</span></>} id="quotationItemsTitle">
             {!items.length ? (
               <div className="empty">
                 <p>报价清单还没有产品。</p>
@@ -167,22 +176,9 @@ export default function Quotation({ quotation, context, onBack, onComplete }) {
                 </article>
               );
             })}
-          </section>
+          </Panel>
 
-          <section className="quotationSection" aria-labelledby="quotationCustomerTitle">
-            <h2 id="quotationCustomerTitle">客户资料</h2>
-            <label>客户名称 *
-              <input value={details.customerName} required maxLength={120} autoComplete="name"
-                onChange={e => updateDetails("customerName", e.target.value)} placeholder="客户或公司名称" />
-            </label>
-            <label>客户电话
-              <input type="tel" value={details.phone} maxLength={40} autoComplete="tel"
-                onChange={e => updateDetails("phone", e.target.value)} placeholder="例如 +60 12 345 6789" />
-            </label>
-          </section>
-
-          <section className="quotationSection" aria-labelledby="quotationInfoTitle">
-            <h2 id="quotationInfoTitle">报价资料</h2>
+          <Panel className="quotationSection" title="报价资料" id="quotationInfoTitle">
             <label>报价编号<input value={details.number} readOnly /></label>
             <label>日期 *<input type="date" value={details.date} required
               onChange={e => updateDetails("date", e.target.value)} /></label>
@@ -195,19 +191,20 @@ export default function Quotation({ quotation, context, onBack, onComplete }) {
             <dl className="quotationTotals">
               <div><dt>小计</dt><dd>{invalidRows ? "—" : formatMoney(totals.subtotal)}</dd></div>
               <div><dt>折扣</dt><dd>{formatMoney(totals.discount)}</dd></div>
+              <div className="totalDivider" aria-hidden="true"><img src="/figma/divider.svg" width="326" height="1" alt="" /></div>
               <div className="grandTotal"><dt>总额</dt><dd>{invalidRows ? "—" : formatMoney(totals.total)}</dd></div>
             </dl>
-          </section>
+          </Panel>
 
-          <section className="quotationSection companySettings">
-            <h2>公司资料（首次保存时的快照）</h2>
+          <Panel className="quotationSection companySettings" title="公司资料（首次保存时的快照）" id="quotationCompanyTitle">
             <p>{company.name} · {company.contact}</p>
             {company.logo && <div className="companyLogoPreview"><img src={company.logo} alt="公司 Logo" /></div>}
             <p>历史报价不会随产品或公司品牌修改而改变。</p>
             {context.role === "admin" && <Link href={`/brand?company=${context.companyId}`}>管理公司品牌（新报价生效）</Link>}
-          </section>
+          </Panel>
         </fieldset>
 
+        <div className="quotationExportActions">
         <button type="submit" className="generatePdfButton saveButton"
           disabled={locked || !items.length || invalidRows || totals.total === null || !!company.logoError}>
           {generating ? "正在生成 PDF…" : "生成报价 PDF"}
@@ -215,6 +212,7 @@ export default function Quotation({ quotation, context, onBack, onComplete }) {
         <button type="button" className="whatsappButton"
           disabled={locked || !items.length || invalidRows || totals.total === null || !!company.logoError}
           onClick={event => generatePdf(event, true)}>准备分享 PDF（自动保存）</button>
+        </div>
       </form>
       {currentPdf && <div className="pdfActions">
         <button type="button" className="cancelButton" disabled={locked} onClick={() => { downloadFile(currentPdf); onComplete(currentPdf, quotation.row.id); }}>下载 PDF</button>
@@ -223,6 +221,7 @@ export default function Quotation({ quotation, context, onBack, onComplete }) {
         </button>
       </div>}
       <p className="quotationMessage" role="status" aria-live="polite">{message}</p>
+      <FloatingAction home disabled={locked} onClick={onBack}>返回目录继续选品</FloatingAction>
     </main>
   );
 }

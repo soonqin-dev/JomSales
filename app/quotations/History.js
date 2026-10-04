@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import useCompanyScope from "../use-company-scope";
 import { createClient } from "../../lib/supabase/client";
 import { listQuotations, manageQuotation } from "../../lib/supabase/workspace";
+import { EmptyState, NavLink, PageHeader, Panel } from "../ui";
 function List({ context }) {
   const [rows, setRows] = useState([]), [error, setError] = useState(""), [loading, setLoading] = useState(true);
   const [trash, setTrash] = useState(false), [search, setSearch] = useState(""), [status, setStatus] = useState("all"), [busy, setBusy] = useState(false);
@@ -31,7 +32,8 @@ function List({ context }) {
   const visible = rows.filter(row => (status === "all" || row.status === status) &&
     (!term || [row.number, row.customer_name, row.creator_email].some(value => (value || "").toLowerCase().includes(term))));
   return <>
-    <Link href={`/cloud?company=${context.companyId}`}>← 公司产品目录</Link><h1>{trash ? "报价回收站" : "已保存报价"}</h1>
+    <PageHeader title={trash ? "报价回收站" : "已保存报价"} subtitle={context.name} />
+    <NavLink href={`/cloud?company=${context.companyId}`}>← 公司产品目录</NavLink>
     <p>{context.name} · {context.role === "admin" ? "管理员可管理本公司全部报价，并查看所属员工。" : "仅显示你自己的报价。"}</p>
     <div className="cloudButtons">
       <Link href={`/cloud?company=${context.companyId}`}>新建报价</Link>
@@ -46,9 +48,11 @@ function List({ context }) {
     </select></label>
     </div>
     {loading && <p role="status">正在读取…</p>}{error && <p role="alert" className="accountError">{error}</p>}
-    {!loading && !error && !visible.length && <p>{trash ? "回收站没有符合条件的报价。" : "没有符合条件的已保存报价。"}</p>}
-    {visible.map(row => <article className="accountCard quotationHistoryRow" key={row.id}>
-      <strong>{row.number}</strong><p>{row.customer_name || "未填写客户"} · {row.quote_date}</p>
+    {!loading && !error && !visible.length && <EmptyState title={trash ? "回收站没有符合条件的报价。" : "没有符合条件的已保存报价。"}>可调整筛选条件，或返回目录开始新报价。</EmptyState>}
+    {visible.map(row => <Panel className="accountCard quotationHistoryRow" key={row.id}>
+      <div className="historyHeading"><div><strong>{row.number}</strong><p>{row.customer_name || "未填写客户"} · {row.quote_date}</p></div>
+        <span className={`statusBadge statusBadge-${row.status}`}>{row.status === "success" ? "Success" : "Pending"}</span>
+      </div>
       <p>所属员工：{row.creator_email || row.created_by}{row.created_by === context.userId ? "（我）" : ""}</p>
       <p>状态：{row.status === "success" ? "Success · 已成交（不代表已收款）" : "Pending · 待客户确认"}</p>
       <div className="cloudButtons">
@@ -63,7 +67,7 @@ function List({ context }) {
           <button className="deleteButton" disabled={busy || loading} onClick={() => act(row, "trash")}>删除报价</button>
         </>}
       </div>
-    </article>)}
+    </Panel>)}
   </>;
 }
 export default function History() {

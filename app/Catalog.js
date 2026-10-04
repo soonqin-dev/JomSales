@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Link from "next/link";
 import Quotation from "./Quotation";
 import { MAX_UNIT_PRICE, moneyToCents } from "./quotation-utils";
 import { canShareFile, downloadFile } from "./share";
 import { prepareUploadImage } from "./images";
 import { createProductCard } from "./product-card";
+import { Button, DesignIcon, EmptyState, FloatingAction, Modal, NavLink, PageHeader, Status } from "./ui";
 
 export default function Catalog({ cloud, quotation }) {
   const items = cloud.items;
@@ -228,40 +228,49 @@ export default function Catalog({ cloud, quotation }) {
   }
 
   if (quotationOpen && quotationReady) {
-    return <Quotation quotation={quotation} context={cloud.context} onBack={() => setQuotationOpen(false)}
+    return <Quotation quotation={quotation} context={cloud.context} cloudError={cloud.error} onBack={() => setQuotationOpen(false)}
       onComplete={(file, id) => { if (quotation.complete(id)) { setCompletedPdf(file); setPdfMessage("报价已自动保存，当前已开始新报价。"); setQuotationOpen(false); } }} />;
   }
 
   return (
-    <main className="page">
-      <section className="hero">
-        <div>
-          <div className="eyebrow">SALES TOOL</div>
-          <h1>SalesGo</h1>
-          <p><Link href="/account">公司账号 · 注册 / 登录</Link></p>
-          <p>Mobile Sales Catalog &amp; Quotation Tool</p>
-          <p>移动产品目录与报价工具</p>
-        </div>
-        <div className="badge">{items.length} 项产品</div>
-      </section>
-
-      <div className="notice">
-        公司工作区：{cloud.name}。产品、报价、客户资料和公司品牌均保存在公司云端。
-        <p className="activeQuotation">{quotation.row?.revision ? `正在编辑：${quotation.details.number}` : "新报价"}</p>
-        <p>{quotation.dirty ? "当前报价有未保存修改；生成／分享时自动保存。" : quotation.message}</p>
-        <button onClick={() => void quotation.reload()} disabled={quotation.busy}>重新读取报价与品牌</button>
+    <main className="page catalogPage">
+      <PageHeader icon="profile" title="公司云端产品" subtitle={cloud.context.email}>
+        <NavLink href="/account" className="profileLink">公司账号</NavLink>
+      </PageHeader>
+      <div className="companyStrip">
+        <span className="companyPill">{cloud.name}</span>
+        <span className="rolePill">{cloud.context.role === "admin" ? "管理员" : cloud.canManage ? "销售员 · 产品管理" : "销售员"}</span>
       </div>
-
-      <div className="quotationSummary" role="status" aria-live="polite">
-        <button type="button" className="quotationCartButton" disabled={!quotationReady} onClick={viewQuotation}>
-          <span>报价清单：<strong>{quotationCount} 件</strong></span>
-          <span>查看 / 生成报价 →</span>
-        </button>
-        <button type="button" className="saveButton newQuotationButton"
-          disabled={!quotationReady || quotation.busy || saving} onClick={startNewQuotation}>
-          ＋ 新建报价单
-        </button>
+      <nav className="workspaceNav" aria-label="公司工作区">
+        <NavLink href={`/quotations?company=${cloud.context.companyId}`}>已保存报价</NavLink>
+        {cloud.context.role === "admin" && <>
+          <NavLink href={`/team?company=${cloud.context.companyId}#invite`}>邀请员工</NavLink>
+          <NavLink href={`/team?company=${cloud.context.companyId}`}>员工与邀请</NavLink>
+          <NavLink href={`/brand?company=${cloud.context.companyId}`}>公司品牌</NavLink>
+        </>}
+      </nav>
+      {cloud.context.memberships.length > 1 && <label className="companySelector">当前公司
+        <select value={cloud.context.companyId} disabled={cloud.busy} onChange={e => window.location.assign(`/cloud?company=${e.target.value}`)}>
+          {cloud.context.memberships.map(m => <option key={m.company_id} value={m.company_id}>{m.companies?.name}</option>)}
+        </select>
+      </label>}
+      <div className="catalogToolbar">
+        <div><span className="fieldHint">当前报价</span><p className="activeQuotation">{quotation.row?.revision ? `正在编辑：${quotation.details.number}` : "新报价"}</p></div>
+        <span className="badge">{items.length} 项产品</span>
       </div>
+      <div className="catalogActions">
+        <NavLink href={`/quotations?company=${cloud.context.companyId}`}>选择报价</NavLink>
+        <Button disabled={cloud.busy || cloud.loading} onClick={cloud.refresh}>刷新云端产品</Button>
+        <Button className="newQuotationButton" disabled={!quotationReady || quotation.busy || saving} onClick={startNewQuotation}>＋ 新建报价单</Button>
+      </div>
+      <Status>{quotation.dirty ? "当前报价有未保存修改；生成／分享时自动保存。" : quotation.message}</Status>
+      <Status>{cloud.loading ? "正在读取云端产品…" : cloud.message}</Status>
+      <Status error>{cloud.error}</Status>
+      <details className="workspaceInfo"><summary>云端资料与权限</summary>
+        <p>产品、报价、客户资料和品牌保存在公司云端。你的产品权限：{cloud.canManage ? "可管理（新增、编辑、删除）" : "仅查看与分享"}。员工与权限设置仅限管理员。</p>
+        <p>其他设备更新后，请刷新读取。图片链接会定期续期，已下载或分享的内容无法撤回。</p>
+        <Button onClick={() => void quotation.reload()} disabled={quotation.busy}>重新读取报价与品牌</Button>
+      </details>
       {completedPdf && <div className="notice pdfActions">
         <p role="status">{pdfMessage}</p>
         <button type="button" onClick={() => downloadFile(completedPdf)}>下载刚生成的 PDF</button>
@@ -278,7 +287,7 @@ export default function Catalog({ cloud, quotation }) {
       {companyError && <p className="quotationError" role="alert">{companyError}</p>}
 
       <div className="searchWrap">
-        <span className="searchIcon">⌕</span>
+        <span className="searchIcon"><DesignIcon name="search" /></span>
         <input
           className="search"
           value={query}
@@ -293,13 +302,13 @@ export default function Catalog({ cloud, quotation }) {
         )}
       </div>
 
-      {cloud.canManage && <button className="addButton" disabled={saving || !cloud.canWrite} onClick={() => { resetForm(); setOpen(true); }}>
-        ＋ 新增产品
+      {cloud.canManage && <button className="addButton" aria-label="＋ 新增产品" disabled={saving || !cloud.canWrite} onClick={() => { resetForm(); setOpen(true); }}>
+        <DesignIcon name="add" /> 新增产品
       </button>}
 
       <section className="list">
         {filtered.length === 0 ? (
-          <div className="empty">没有找到符合的产品。</div>
+          <EmptyState title={query ? "没有找到符合的产品。" : "公司目录还没有产品"}>{query ? "试试产品编号、名称或标签。" : cloud.canManage ? "新增第一项产品，开始展示与报价。" : "产品准备好后，会显示在这里。"}</EmptyState>
         ) : (
           filtered.map((item) => (
             <article className="card" key={item.id} onClick={() => openProductDetail(item)}>
@@ -370,6 +379,9 @@ export default function Catalog({ cloud, quotation }) {
           ))
         )}
       </section>
+      <FloatingAction className="quotationCartButton" count={quotationCount} disabled={!quotationReady} onClick={viewQuotation}>
+        报价清单：{quotationCount} 件 查看 / 生成报价 →
+      </FloatingAction>
 
       {selectedProduct && (
         <dialog
@@ -453,11 +465,10 @@ export default function Catalog({ cloud, quotation }) {
       )}
 
       {open && (
-        <div className="overlay" onMouseDown={closeForm}>
-          <div className="sheet" onMouseDown={(e) => e.stopPropagation()}>
+        <Modal labelledBy="productFormTitle" locked={saving} onClose={closeForm}>
             <div className="sheetHeader">
               <div>
-                <h2>{editingId ? "编辑产品" : "新增产品"}</h2>
+                <h2 id="productFormTitle">{editingId ? "编辑产品" : "新增产品"}</h2>
                 <p>{editingId ? "修改产品资料后保存" : "填写产品资料后保存"}</p>
               </div>
               <button className="closeButton" aria-label="关闭产品表单" onClick={closeForm}>
@@ -549,8 +560,7 @@ export default function Catalog({ cloud, quotation }) {
               </div>
               </fieldset>
             </form>
-          </div>
-        </div>
+        </Modal>
       )}
     </main>
   );
