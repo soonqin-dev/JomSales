@@ -916,3 +916,8 @@ form small {
   opacity: 0.55;
   cursor: default;
 }
+.catalogLinkUrl { display: block; overflow-wrap: anywhere; }
+.catalogPublicThumb { width: 100px; height: 100px; object-fit: contain; }
+.accountCard input[type="checkbox"] { width: auto; min-width: 20px; min-height: 20px; padding: 0; margin-right: 8px; vertical-align: middle; }
+.publicCatalog .accountCard { overflow-wrap: anywhere; }
+.preserveLines { white-space: pre-wrap; }
