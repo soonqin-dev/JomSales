@@ -1,7 +1,8 @@
 // Local API double. Real authorization is tested separately against PostgreSQL.
 const {createFixture}=require("./workspace-browser-fixture.cjs");
 function createCatalogFixture(port){
-  const f=createFixture(port),original=f.server.listeners("request")[0],links=[],profiles=new Map(Object.entries(f.users).map(([key,u])=>[u.id,{user_id:u.id,display_name:key+" Name",whatsapp:key==="peer"?"":"+60123456789"}]));
+  const f=createFixture(port),original=f.server.listeners("request")[0],links=[],profiles=f.profiles;
+  profiles.get(f.users.peer.id).whatsapp='';
   const state={lostReply:false},secret="sb_secret_local_catalog_fixture_only",catalogRequests=[];
   const uuid=n=>`60000000-0000-4000-a000-${String(n).padStart(12,"0")}`;
   f.products[0].catalog_public=false;
@@ -49,7 +50,8 @@ function createCatalogFixture(port){
         const l=live(body.link_token);if(!l)throw Error("Catalog link unavailable");const term=body.search_text.toLowerCase(),rows=f.products.filter(p=>visible(l,p)&&`${p.serial} ${p.name} ${p.description||""}`.toLowerCase().includes(term));
         const result=shaped(page(rows,body.after_id?{id:body.after_id,created_at:body.after_created}:null));
         // Deliberately includes internal fields. The public HTTP DTO must remove them.
-        data={...result,total:rows.length,company_name:f.companies.find(c=>c.id===l.company_id).name,seller_name:l.seller_name,whatsapp:l.whatsapp,expires_at:l.expires_at,items:result.items.map(p=>({...p,has_image:!!p.image_path}))};
+        const filtered=body.category_filter==null?rows:rows.filter(p=>(p.category||'').toLowerCase()===body.category_filter.toLowerCase()),categoryResult=shaped(page(filtered,body.after_id?{id:body.after_id,created_at:body.after_created}:null));
+        data={...categoryResult,total:filtered.length,categories:[...new Set(f.products.filter(p=>visible(l,p)).map(p=>p.category||''))],company_name:f.companies.find(c=>c.id===l.company_id).name,seller_name:l.seller_name,whatsapp:l.whatsapp,expires_at:l.expires_at,items:categoryResult.items.map(p=>({...p,has_image:!!p.image_path}))};
       }else if(path.endsWith("/public_catalog_image")||path.endsWith("/public_catalog_inquiry")){
         const l=live(body.link_token),p=f.products.find(p=>p.id===body.target_product);if(!l||!p||!visible(l,p))throw Error("Catalog link unavailable");
         if(path.endsWith("/public_catalog_image")){if(!p.image_path)throw Error("Catalog image unavailable");data=p.image_path;}else data={whatsapp:l.whatsapp,serial:p.serial,name:p.name};

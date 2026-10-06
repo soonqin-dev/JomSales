@@ -1,15 +1,18 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import CategoryFilter from '../../CategoryFilter';
 
 export default function PublicCatalog({ token }) {
   const [data,setData]=useState(null),[query,setQuery]=useState(""),[page,setPage]=useState(0),[busy,setBusy]=useState(true),[error,setError]=useState(""),[selected,setSelected]=useState(null);
   const [imageErrors,setImageErrors]=useState({});
+  const [category,setCategory]=useState(null),categoryRef=useRef(null);
   const sequence=useRef(0),abort=useRef(null),cursors=useRef([null]),current=useRef({query:"",page:0}),loadRef=useRef(null);
   const api=`/api/catalog/${token}`;
   async function load() {
     const version=++sequence.current;abort.current?.abort();const controller=new AbortController();abort.current=controller;
     setBusy(true);setError("");setData(null);setSelected(null);setImageErrors({});
     const state=current.current,params=new URLSearchParams({q:state.query}),cursor=cursors.current[state.page];
+    if(categoryRef.current!==null)params.set('category',categoryRef.current);
     if(cursor){params.set("after_created",cursor.created_at);params.set("after_id",cursor.id);}
     try {const response=await fetch(`${api}?${params}`,{cache:"no-store",signal:controller.signal}),result=await response.json();
       if(version!==sequence.current)return;if(!response.ok)throw new Error(result.error || "目录读取失败，请重试。");
@@ -18,17 +21,19 @@ export default function PublicCatalog({ token }) {
     finally{if(version===sequence.current)setBusy(false);}
   }
   loadRef.current=load;
-  useEffect(()=>{const timer=setTimeout(()=>void loadRef.current(),200);return()=>{clearTimeout(timer);++sequence.current;abort.current?.abort();};},[query,page]);
+  useEffect(()=>{const timer=setTimeout(()=>void loadRef.current(),200);return()=>{clearTimeout(timer);++sequence.current;abort.current?.abort();};},[query,page,category]);
   useEffect(()=>{const refresh=()=>void loadRef.current(),timer=setInterval(refresh,60000);window.addEventListener("focus",refresh);return()=>{clearInterval(timer);window.removeEventListener("focus",refresh);};},[]);
   useEffect(()=>{if(!data)return;const delay=Math.max(0,Math.min(2147483647,Date.parse(data.expires_at)-Date.now()));const timer=setTimeout(()=>{++sequence.current;abort.current?.abort();setData(null);setSelected(null);setBusy(false);setError("此目录链接已到期，请索取新链接。");},delay);return()=>clearTimeout(timer);},[data]);
   function search(value){++sequence.current;abort.current?.abort();current.current={query:value,page:0};cursors.current=[null];setData(null);setSelected(null);setBusy(true);setQuery(value);setPage(0);}
   function navigate(next){if(busy||!data||next<0)return;if(next>page)cursors.current[next]=data.cursor;current.current={query,page:next};setData(null);setSelected(null);setBusy(true);setPage(next);}
+  function filterCategory(value){categoryRef.current=value;setCategory(value);search(query);}
   const inquiry=p=><a href={`${api}/inquire/${p.id}`} target="_blank" rel="noopener noreferrer">WhatsApp 询价</a>;
   function imageFailed(e,id){e.currentTarget.hidden=true;setImageErrors(prev=>({...prev,[id]:true}));}
   return <main className="page accountPage publicCatalog"><h1>{data?.company_name || "产品目录"}</h1>
     {data&&<p>联系人：{data.seller_name} · {data.whatsapp}</p>}
     <label>搜索产品<input value={query} maxLength={240} placeholder="产品编号、名称、分类、标签" onChange={e=>search(e.target.value)}/></label>
     <button disabled={busy} onClick={()=>void load()}>刷新目录</button>
+    {data&&<CategoryFilter categories={data.categories} value={category} onChange={filterCategory}/>}
     {busy&&<p role="status">正在读取目录…</p>}{error&&<p role="alert">{error}</p>}
     {data&&<><p>{data.total} 项产品 · 有效至 {new Date(data.expires_at).toLocaleString()}</p>
       {!data.items.length&&<p>没有符合条件的产品。</p>}

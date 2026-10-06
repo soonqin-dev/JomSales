@@ -9,6 +9,7 @@ const uuid=n=>`90000000-0000-4000-a000-${String(n).padStart(12,"0")}`;
 const encode=value=>Buffer.from(JSON.stringify(value)).toString("base64url");
 const users=Object.fromEntries(["platform","owner","sales","waiting"].map((key,i)=>[key,{id:uuid(i+1),email:`${key}@fixture.example`,aud:"authenticated",role:"authenticated",email_confirmed_at:new Date().toISOString(),user_metadata:{},app_metadata:{},factors:[],created_at:new Date().toISOString()}]));
 const profiles=Object.fromEntries(Object.values(users).map(user=>[user.id,{user_id:user.id,display_name:"",whatsapp:"",revision:1}]));
+for(const key of ['owner','sales'])Object.assign(profiles[users[key].id],{display_name:key+' Name',whatsapp:'+60123456789'});
 const co=uuid(10), companies=[{id:co,name:"Fixture Company",service_state:"active",service_until:null,access_revision:1,plan:"Lite",employee_limit:null,product_limit:null,storage_limit_mb:null,features:{},admin_email:users.owner.email,members:2,products:0,storage_bytes:0}];
 const roster=[{user_id:users.owner.id,email:users.owner.email,role:"admin",is_primary:true,active:true,removed_at:null},{user_id:users.sales.id,email:users.sales.email,role:"sales",is_primary:false,active:true,removed_at:null,can_manage_products:false}];
 const invitations=[],errors=[];let recoverCalls=0,lostCreate=true,failProfile=false,configured=false;
@@ -42,6 +43,7 @@ const fixture=createServer(async(req,res)=>{
       if(method.startsWith("platform_")&&user?.id!==users.platform.id){status=403;data={message:"Platform administrator access required."};}
       else if(method==="is_platform_admin")data=user?.id===users.platform.id;
       else if(method==="search_company_products")data={items:[],total:0,has_more:false,cursor:null};
+      else if(method==='list_company_categories')data=[];
       else if(method==="get_quotation_defaults")data={prefix:"Q",digits:5,validity_days:14,payment_terms:"",notes:"",revision:1};
       else if(method==="company_sales_report")data={rows:[],legacy_undated:0};
       else if(method==="save_account_profile"){

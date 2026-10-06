@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "../lib/supabase/client";
+import { companyProfileReady,companyProfileSetupUrl } from "../lib/supabase/company-profile";
 
 // Every secondary workspace screen revalidates live company membership.
 export default function useCompanyScope(adminOnly = false) {
@@ -26,6 +27,9 @@ export default function useCompanyScope(adminOnly = false) {
           setContext(null);
           throw new Error(adminOnly ? "此页面仅供该公司管理员使用。" : "公司访问权限不可用或已停用。");
         }
+        const ready=await companyProfileReady(client,identity.current);
+        if(version!==sequence.current)return;
+        if(!ready){setContext(null);window.location.replace(companyProfileSetupUrl(id,window.location.pathname+window.location.search));return;}
         setContext(prev => prev?.companyId === id && prev.role === member.role ? prev : { companyId: id, userId: identity.current, role: member.role, name: member.companies.name });
         setError("");
       } catch (err) { if (version === sequence.current) setError(`权限／网络检查失败：${err.message}`); }

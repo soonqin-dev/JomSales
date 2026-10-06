@@ -41,9 +41,9 @@ test("quotation save recovers only identical committed lost replies and rejects 
   await assert.rejects(api.saveQuotation(stale.client,scope,{...result,details:{...result.details,notes:"stale"}}),/其他设备修改/);
   assert.equal(stale.rows[0].notes,"newer edit");
 });
-test("history pagination continues beyond 500 and signed branding failures are explicit",async()=>{
-  const m=mock({signError:true});m.rows.push(...Array.from({length:1001},(_,id)=>({id})));
-  assert.equal((await api.listQuotations(m.client,scope.companyId)).length,1001);assert.equal(m.ranges.length,3);
+test("history reads only one cloud page and forwards server-side search/cursor",async()=>{
+  const m=mock({signError:true}),calls=[];const client={rpc:async(name,args)=>{calls.push({name,args});return{data:{items:Array.from({length:50},(_,id)=>({id})),has_more:true,cursor:{updated_at:'2026-10-06',id:'last'}}};}};
+  assert.equal((await api.listQuotations(client,scope.companyId,false,{search:'ABC',status:'paid',cursor:{updated_at:'2026-10-06',id:'previous'}})).items.length,50);assert.equal(calls.length,1);assert.equal(calls[0].name,'search_company_quotations');assert.equal(calls[0].args.search_text,'ABC');assert.equal(calls[0].args.after_id,'previous');assert.equal(calls[0].args.filter_status,'paid');
   const signed=await api.signedBrand(m.client,{...brand,logo_path:"existing"});assert.match(signed.logoError,/无法读取/);assert.equal(signed.logo,"");
 });
 

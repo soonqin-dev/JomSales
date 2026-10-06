@@ -7,6 +7,8 @@ import { createClient } from "../../lib/supabase/client";
 import { readProducts, readProductDetail, signedProducts, saveProduct, deleteProduct } from "../../lib/supabase/products";
 import useCloudQuotation from "../use-cloud-quotation";
 import { canManageProducts } from "../../lib/supabase/permissions";
+import { companyProfileReady,companyProfileSetupUrl } from "../../lib/supabase/company-profile";
+import { readCategories } from "../../lib/supabase/categories";
 
 function CompanyWorkspace({ context, cloud }) {
   const quotation = useCloudQuotation(context);
@@ -22,6 +24,7 @@ export default function CloudCatalogPage() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [query, setQuery] = useState(""), [page, setPage] = useState(0), [pageInfo, setPageInfo] = useState({ total: 0, has_more: false });
+  const [categories,setCategories]=useState([]),[category,setCategory]=useState(null),categoryRef=useRef(null);
   const queryRef = useRef(""), cursorRef = useRef(null), pageCursors = useRef([null]);
   const generation = useRef(0);
   const verification = useRef(0);
@@ -52,10 +55,13 @@ export default function CloudCatalogPage() {
         scope.current = null; setContext(null); setItems([]);
         throw new Error("你尚未加入公司，或公司权限已被停用。请到公司账号页确认。");
       }
-      const products = await readProducts(client, companyId, { query: queryRef.current, cursor: cursorRef.current });
+      const profileReady=await companyProfileReady(client,auth.data.user.id);
+      if(version!==generation.current)return;
+      if(!profileReady){scope.current=null;setContext(null);setItems([]);window.location.replace(companyProfileSetupUrl(companyId,window.location.pathname+window.location.search));return;}
+      const [products,categoryRows]=await Promise.all([readProducts(client, companyId, { query: queryRef.current, cursor: cursorRef.current,category:categoryRef.current }),readCategories(client,companyId)]);
       if (version !== generation.current) return;
       const next = { userId: auth.data.user.id, companyId, role: member.role, can_manage_products: member.can_manage_products === true, name: member.companies.name, memberships: result.data };
-      scope.current = next; setContext(next); setItems(products.items); setPageInfo(products); setVerified(true);
+      scope.current = next; setContext(next); setItems(products.items);setCategories(categoryRows); setPageInfo(products); setVerified(true);
     } catch (err) {
       if (version === generation.current) {
         if (err.code === "42501" || /Company access denied/i.test(err.message)) { scope.current = null; setContext(null); setItems([]); }
@@ -71,11 +77,12 @@ export default function CloudCatalogPage() {
     ++generation.current; queryRef.current = value; cursorRef.current = null; pageCursors.current = [null];
     setQuery(value); setPage(0); setItems([]); setLoading(true);
   }
+  function filterCategory(value){if(working.current)return;categoryRef.current=value;setCategory(value);++generation.current;cursorRef.current=null;pageCursors.current=[null];setPage(0);setItems([]);setLoading(true);}
   useEffect(() => {
     if (!scope.current || working.current) return;
     const timer = setTimeout(() => void load(), 250);
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query,category]);
 
   function navigate(nextPage) {
     if (working.current || loading || nextPage < 0) return;
@@ -220,7 +227,7 @@ export default function CloudCatalogPage() {
     </div>
     {context && <CompanyWorkspace key={`${context.userId}:${context.companyId}`} context={context} cloud={{
       items, name: context.name, canManage: verified && canManageProducts(context), canWrite: verified && !loading && canManageProducts(context) && !busy, save, remove,
-      query, search, loading, busy, total: pageInfo.total, page, hasMore: pageInfo.has_more,
+      query, search,categories,category,filterCategory, loading, busy, total: pageInfo.total, page, hasMore: pageInfo.has_more,
       previous: () => navigate(page - 1), next: () => navigate(page + 1), detail
     }} />}
   </>;

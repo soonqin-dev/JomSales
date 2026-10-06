@@ -6,6 +6,7 @@ import { createClient } from "../../lib/supabase/client";
 import { newInviteToken, teamError } from "../../lib/supabase/invitations";
 import { memberLabel } from "../../lib/account-utils";
 import SalesReport from "./SalesReport";
+import { companyProfileReady,companyProfileSetupUrl } from "../../lib/supabase/company-profile";
 
 function inviteStatus(invite) {
   if (invite.accepted_at) return "已接受";
@@ -50,6 +51,9 @@ export default function TeamPage() {
       const selected = requestedCompany || scope.current?.companyId || new URLSearchParams(window.location.search).get("company") || companies[0]?.company_id;
       const member = companies.find(m => m.company_id === selected);
       if (!member) throw new Error("此公司没有可用的管理员权限。请回公司账号页确认。");
+      const profileReady=await companyProfileReady(client,auth.data.user.id);
+      if(version!==generation.current)return;
+      if(!profileReady){clear();window.location.replace(companyProfileSetupUrl(selected,window.location.pathname+window.location.search));return;}
       const [team, invitations] = await Promise.all([
         client.rpc("get_company_roster", { target_company: selected }),
         client.rpc("get_company_invitations", { target_company: selected })

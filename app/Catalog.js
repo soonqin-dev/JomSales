@@ -7,6 +7,7 @@ import { MAX_UNIT_PRICE, moneyToCents } from "./quotation-utils";
 import { canShareFile, downloadFile } from "./share";
 import { prepareUploadImage } from "./images";
 import { createProductCard } from "./product-card";
+import CategoryFilter from "./CategoryFilter";
 
 export default function Catalog({ cloud, quotation }) {
   const items = cloud.items;
@@ -177,7 +178,7 @@ export default function Catalog({ cloud, quotation }) {
     setTags((item.tags || []).join(", "));
     setPrice(String(item.price));
     setImage(item.image || "");
-    setUnit(item.unit || "件"); setCategory(item.category || ""); setDescription(item.description || ""); setService(item.is_service === true);
+    setUnit(item.unit || "件"); setCategory(cloud.categories?.find(c=>c.name.toLowerCase()===item.category?.trim().toLowerCase())?.name || item.category || ""); setDescription(item.description || ""); setService(item.is_service === true);
     setOpen(true);
   }
 
@@ -314,6 +315,7 @@ export default function Catalog({ cloud, quotation }) {
       {cloud.canManage && <button className="addButton" disabled={saving || !cloud.canWrite} onClick={() => { resetForm(); setOpen(true); }}>
         ＋ 新增产品
       </button>}
+      <CategoryFilter categories={cloud.categories} value={cloud.category} onChange={cloud.filterCategory} disabled={saving||cloud.busy}/>
 
       <section className="list">
         {cloud.loading ? <p role="status">正在搜索公司目录…</p> : filtered.length === 0 ? (
@@ -504,7 +506,7 @@ export default function Catalog({ cloud, quotation }) {
 
               <details><summary>单位、分类与说明（可选）</summary>
                 <label>单位<input value={unit} maxLength={30} placeholder="件、盒、米、公斤、小时" onChange={e => setUnit(e.target.value)} /></label>
-                <label>分类<input value={category} maxLength={80} onChange={e => setCategory(e.target.value)} /></label>
+                <label>产品分类<select aria-label="产品分类" value={category} onChange={e=>setCategory(e.target.value)}><option value="">未分类</option>{(cloud.categories||[]).filter(c=>c.active).map(c=><option key={c.id} value={c.name}>{c.name}</option>)}{category&&!(cloud.categories||[]).some(c=>c.active&&c.name===category)&&<option value={category}>{category}（原分类，已停用或待刷新）</option>}</select></label>
                 <label>说明<textarea rows={3} value={description} maxLength={2000} onChange={e => setDescription(e.target.value)} /></label>
                 <label>项目类型<select value={service ? "service" : "product"} onChange={e => setService(e.target.value === "service")}><option value="product">商品</option><option value="service">服务／人工</option></select></label>
               </details>

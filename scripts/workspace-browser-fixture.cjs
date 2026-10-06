@@ -7,6 +7,8 @@ const encode = value => Buffer.from(JSON.stringify(value)).toString("base64url")
 function createFixture(port=54329) {
   const origin=`http://localhost:${port}`,CA=uuid(10),CB=uuid(11);
   const users=Object.fromEntries(["owner","sales","peer","other","disabled","new"].map((key,i)=>[key,{id:uuid(i+1),email:`${key}@example.test`,aud:"authenticated",role:"authenticated",app_metadata:{},user_metadata:{},email_confirmed_at:new Date().toISOString(),created_at:new Date().toISOString()}]));
+  const profiles=new Map(Object.entries(users).map(([key,u])=>[u.id,{user_id:u.id,display_name:key+' Name',whatsapp:'+60123456789',revision:1}]));
+  const categories=[];
   const companies=[{id:CA,name:"Company A",contact:"A phone",logo_path:null,brand_revision:1},{id:CB,name:"Company B",contact:"B phone",logo_path:null,brand_revision:1}];
   const members=Object.entries(users).filter(([key])=>key!=="new").map(([key,user])=>({company_id:key==="other"?CB:CA,user_id:user.id,role:["owner","other"].includes(key)?"admin":"sales",is_primary:["owner","other"].includes(key),active:key!=="disabled",can_manage_products:false}));
   const image=`${CA}/${uuid(20)}/${uuid(30)}.png`;
@@ -47,6 +49,10 @@ function createFixture(port=54329) {
       } else if(path==="/auth/v1/user") {if(user)data=user;else{status=401;data={message:"Invalid issued token"};}}
       else if(path==="/auth/v1/logout") {if(user)tokens.delete(req.headers.authorization.replace(/^Bearer /,""));data={};}
       else if(path==="/rest/v1/company_members") data=own.filter(match).map(m=>({...m,companies:companies.find(c=>c.id===m.company_id)}));
+      else if(path==='/rest/v1/account_profiles')data=[profiles.get(user?.id)].filter(Boolean);
+      else if(path==='/rest/v1/rpc/save_account_profile'){
+        const p=profiles.get(user?.id);if(!p||p.revision!==body.expected_revision)throw Error('Profile changed');Object.assign(p,{display_name:body.profile_name,whatsapp:body.work_whatsapp,revision:p.revision+1});data=p;
+      }
       else if(path==="/rest/v1/companies") data=companies.filter(c=>member(c.id)&&match(c));
       else if(path==="/rest/v1/customers"){
         const visible=customers.filter(c=>member(c.company_id)&&(member(c.company_id).role==="admin"||c.created_by===user.id)&&match(c));
@@ -80,7 +86,7 @@ function createFixture(port=54329) {
         if(member(body.target_company)?.role!=="admin")throw Error("Administrator access required");const row=defaults(body.target_company);
         if(row.revision!==body.expected_revision)throw Error("Settings changed");data=Object.assign(row,{prefix:body.number_prefix,digits:body.number_digits,validity_days:body.valid_days,payment_terms:body.payment_text,notes:body.default_notes,revision:row.revision+1});
       }else if(path==="/rest/v1/rpc/search_company_customers"){
-        if(!member(body.target_company))throw Error("Company access denied");const visible=customers.filter(c=>c.company_id===body.target_company&&(member(c.company_id).role==="admin"||c.created_by===user.id)&&(body.include_inactive||c.active)&&[c.name,c.company,c.phone,c.email].join(" ").toLowerCase().includes(body.search_text.toLowerCase()));data={items:visible.slice(body.page_offset,body.page_offset+50),total:visible.length};
+        if(!member(body.target_company))throw Error("Company access denied");const visible=customers.filter(c=>c.company_id===body.target_company&&(member(c.company_id).role==="admin"||c.created_by===user.id)&&(body.include_inactive||c.active)).map(c=>({...c,owner_name:profiles.get(c.created_by)?.display_name||'',owner_email:Object.values(users).find(u=>u.id===c.created_by)?.email||''})).filter(c=>[c.name,c.company,c.phone,c.email,c.owner_name,c.owner_email].join(" ").toLowerCase().includes(body.search_text.toLowerCase()));data={items:visible.slice(body.page_offset,body.page_offset+50),total:visible.length};
       }else if(path==="/rest/v1/rpc/create_quotation"){
         if(state.failQuote){state.failQuote=false;throw Error("Simulated quote save failure");}
         if(!member(body.target_company))throw Error("Company access denied");
@@ -95,10 +101,24 @@ function createFixture(port=54329) {
           for(const q of won)for(const line of q.items)if(line.product.is_service===false)goods.set(line.product.unit,(goods.get(line.product.unit)||0)+line.quantity);
           const u=Object.values(users).find(u=>u.id===m.user_id);return{...m,name:u.email,email:u.email,quote_count:own.filter(q=>inRange(q.created_at)).length,confirmed_count:won.length,confirmed_amount:won.reduce((sum,q)=>sum+amount(q),0).toFixed(2),paid_amount:paid.reduce((sum,q)=>sum+amount(q),0).toFixed(2),goods:[...goods].map(([unit,quantity])=>({unit,quantity:String(quantity)}))};});data={rows:rows.sort((a,b)=>Number(b.confirmed_amount)-Number(a.confirmed_amount)),legacy_undated:0};
       }
+      else if(path==='/rest/v1/rpc/search_company_quotations'){
+        if(!member(body.target_company))throw Error('Company access denied');const term=body.search_text.toLowerCase();
+        const rows=quotations.filter(q=>q.company_id===body.target_company&&(member(q.company_id).role==='admin'||q.created_by===user.id)&&!!q.deleted_at===body.in_trash&&(body.filter_status==='all'||q.status===body.filter_status)&&[q.number,q.customer_name,q.creator_name,q.creator_email].some(v=>(v||'').toLowerCase().includes(term)))
+          .filter(q=>!body.after_updated||q.updated_at<body.after_updated||(q.updated_at===body.after_updated&&q.id>body.after_id)).sort((a,b)=>b.updated_at.localeCompare(a.updated_at)||a.id.localeCompare(b.id));
+        const items=rows.slice(0,50);data={items,has_more:rows.length>50,cursor:items.length?{updated_at:items.at(-1).updated_at,id:items.at(-1).id}:null};
+      }
+      else if(path==='/rest/v1/rpc/list_company_categories'){
+        if(!member(body.target_company))throw Error('Company access denied');for(const p of products.filter(p=>p.company_id===body.target_company&&p.category))if(!categories.some(c=>c.company_id===p.company_id&&c.name.toLowerCase()===p.category.trim().toLowerCase()))categories.push({id:randomUUID(),company_id:p.company_id,name:p.category.trim(),active:true,revision:1});
+        data=categories.filter(c=>c.company_id===body.target_company).map(c=>({...c,product_count:products.filter(p=>p.company_id===c.company_id&&!p.deleted_at&&(p.category||'').toLowerCase()===c.name.toLowerCase()).length}));
+      }else if(path==='/rest/v1/rpc/manage_company_category'){
+        if(member(body.target_company)?.role!=='admin')throw Error('Administrator required');let row=categories.find(c=>c.company_id===body.target_company&&c.id===body.target_category);
+        if(body.action==='create'){if(!row){if(categories.some(c=>c.company_id===body.target_company&&c.name.toLowerCase()===body.category_name.toLowerCase()))throw Error('Duplicate category');row={id:body.target_category,company_id:body.target_company,name:body.category_name,active:true,revision:1};categories.push(row);}}
+        else{if(!row||row.revision!==body.expected_revision)throw Error('Category changed');if(body.action==='rename'){for(const p of products.filter(p=>p.company_id===row.company_id&&(p.category||'').toLowerCase()===row.name.toLowerCase())){p.category=body.category_name;p.revision++;}row.name=body.category_name;}else row.active=body.action==='restore';row.revision++;}data=row;
+      }
       else if(path==="/rest/v1/rpc/search_company_products") {
         if(!member(body.target_company))throw Error("Company access denied");
         if(body.search_text==="slow")await new Promise(resolve=>setTimeout(resolve,800));
-        const matches=products.filter(p=>p.company_id===body.target_company&&!p.deleted_at&&[p.serial,p.name,p.category,p.description,...(p.tags||[])].join(" ").toLowerCase().includes(body.search_text.toLowerCase()))
+        const matches=products.filter(p=>p.company_id===body.target_company&&!p.deleted_at&&(body.category_filter==null||(p.category||'').trim().toLowerCase()===body.category_filter.trim().toLowerCase())&&[p.serial,p.name,p.category,p.description,...(p.tags||[])].join(" ").toLowerCase().includes(body.search_text.toLowerCase()))
           .sort((a,b)=>b.created_at.localeCompare(a.created_at)||a.id.localeCompare(b.id));
         const after=matches.filter(p=>!body.after_created||p.created_at<body.after_created||(p.created_at===body.after_created&&p.id>body.after_id));
         const items=after.slice(0,50);data={items,total:matches.length,has_more:after.length>50,cursor:items.length?{id:items.at(-1).id,created_at:items.at(-1).created_at}:null};
@@ -171,6 +191,6 @@ function createFixture(port=54329) {
     } catch(err) {status=400;data={message:err.message,code:"FIXTURE"};}
     res.writeHead(status,{"Content-Type":"application/json"});res.end(JSON.stringify(data));
   });
-  return {server,origin,users,companies,members,products,quotations,customers,events,state,png,requests,session,CA,CB};
+  return {server,origin,users,companies,members,products,quotations,customers,profiles,categories,events,state,png,requests,session,CA,CB};
 }
 module.exports={createFixture};

@@ -921,3 +921,5 @@ form small {
 .accountCard input[type="checkbox"] { width: auto; min-width: 20px; min-height: 20px; padding: 0; margin-right: 8px; vertical-align: middle; }
 .publicCatalog .accountCard { overflow-wrap: anywhere; }
 .preserveLines { white-space: pre-wrap; }
+.categoryFilter { display: grid; gap: 6px; min-width: 0; margin: 12px 0; }
+.categoryFilter select { width: 100%; max-width: 100%; min-width: 0; min-height: 44px; padding: 10px; font: inherit; background: white; border: 1px solid #d1d5db; border-radius: 6px; }
