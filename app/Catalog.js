@@ -237,7 +237,7 @@ export default function Catalog({ cloud, quotation }) {
       <section className="hero">
         <div>
           <div className="eyebrow">SALES TOOL</div>
-          <h1>SalesGo</h1>
+          <h1>JomSales</h1>
           <p><Link href="/account">公司账号 · 注册 / 登录</Link></p>
           <p>Mobile Sales Catalog &amp; Quotation Tool</p>
           <p>移动产品目录与报价工具</p>
@@ -268,7 +268,7 @@ export default function Catalog({ cloud, quotation }) {
         <button type="button" disabled={sharing} onClick={async () => {
           if (!canShareFile(completedPdf)) { setPdfMessage("此浏览器无法直接分享 PDF，请下载后通过 WhatsApp 文档附件发送。"); return; }
           setSharing(true);
-          try { await navigator.share({ files: [completedPdf], title: "SalesGo Quotation" }); setPdfMessage("已完成刚生成 PDF 的分享；当前报价清单保持不变。"); }
+          try { await navigator.share({ files: [completedPdf], title: "JomSales Quotation" }); setPdfMessage("已完成刚生成 PDF 的分享；当前报价清单保持不变。"); }
           catch (err) { setPdfMessage(err.name === "AbortError" ? "分享已取消，PDF 仍可下载或重试分享。" : "分享未完成，请下载 PDF 后发送。"); }
           finally { setSharing(false); }
         }}>分享刚生成的 PDF</button>

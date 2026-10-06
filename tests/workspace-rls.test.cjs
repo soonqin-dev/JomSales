@@ -15,7 +15,9 @@ test("cloud-only PostgreSQL migration, live verification and private historical 
       alter table storage.objects enable row level security; grant select,insert,update,delete on storage.objects to authenticated,anon;
       create function storage.foldername(name text) returns text[] language sql immutable as $$ select (string_to_array(name,'/'))[1:array_length(string_to_array(name,'/'),1)-1] $$;`);
     const existingUser="70000000-0000-4000-a000-000000000001",existingCompany="70000000-0000-4000-a000-000000000010";
-    for (const file of readdirSync(join(__dirname,"../supabase/migrations")).filter(f => f.endsWith(".sql")).sort()) {
+    // Legacy rollback fixtures exercise the pre-Launchpad self-service API.
+    // Launchpad deliberately closes that API and has its own complete RLS suite.
+    for (const file of readdirSync(join(__dirname,"../supabase/migrations")).filter(f => f.endsWith(".sql") && f < "202610060001").sort()) {
       if (file === "202610040005_quotation_lifecycle.sql") await db.exec(`
         insert into auth.users(id,email) values('${existingUser}','existing@example.test');
         insert into public.companies(id,name) values('${existingCompany}','Original brand');

@@ -883,6 +883,12 @@ form small {
   border: 1px solid var(--border); border-radius: 8px; background: white;
 }
 .teamRow p { color: var(--muted); margin: 8px 0 0; }
+.accountCard select, .accountCard textarea {
+  width: 100%; min-width: 0; min-height: 44px; padding: 10px;
+  border: 1px solid var(--border); border-radius: 6px; font: inherit; background: white;
+  margin: 6px 0 14px;
+}
+.accountCard summary { cursor: pointer; min-height: 44px; padding: 10px 0; }
 .teamRow button { min-height: 44px; }
 .teamPermission { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-top: 8px; font-size: 14px; }
 .accountCard .teamPermission input { width: 20px; height: 20px; padding: 0; margin: 0; flex-shrink: 0; accent-color: var(--blue); }

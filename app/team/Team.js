@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
 import { newInviteToken, teamError } from "../../lib/supabase/invitations";
+import { memberLabel } from "../../lib/account-utils";
 
 function inviteStatus(invite) {
   if (invite.accepted_at) return "已接受";
@@ -41,7 +42,7 @@ export default function TeamPage() {
       if (auth.error && auth.error.name !== "AuthSessionMissingError") throw auth.error;
       if (version !== generation.current) return;
       if (!auth.data.user) { clear(); window.location.replace("/account"); return; }
-      const result = await client.from("company_members").select("company_id,role,companies(id,name)")
+      const result = await client.from("company_members").select("company_id,role,is_primary,companies(id,name)")
         .eq("user_id", auth.data.user.id).eq("active", true);
       if (result.error) throw result.error;
       const companies = (result.data || []).filter(m => m.role === "admin" && m.companies);
@@ -49,7 +50,7 @@ export default function TeamPage() {
       const member = companies.find(m => m.company_id === selected);
       if (!member) throw new Error("此公司没有可用的管理员权限。请回公司账号页确认。");
       const [team, invitations] = await Promise.all([
-        client.rpc("get_company_team_permissions", { target_company: selected }),
+        client.rpc("get_company_roster", { target_company: selected }),
         client.rpc("get_company_invitations", { target_company: selected })
       ]);
       if (team.error) throw team.error;
@@ -58,7 +59,7 @@ export default function TeamPage() {
       if (scope.current?.companyId !== selected || scope.current?.userId !== auth.data.user.id) {
         pendingRequest.current = null; setShare(null); setEmail("");
       }
-      const next = { userId: auth.data.user.id, companyId: selected, name: member.companies.name, companies };
+      const next = { userId: auth.data.user.id, companyId: selected, name: member.companies.name, isPrimary: member.is_primary, companies };
       scope.current = next; setContext(next); setMembers(team.data || []); setInvites(invitations.data || []);
     } catch (err) {
       if (version === generation.current) { clear(); setError(teamError(err)); }
@@ -115,10 +116,18 @@ export default function TeamPage() {
     });
   }
 
+  function manage(member, action, label) {
+    if (!window.confirm(`${label} ${member.display_name || member.email}？公司资料与历史报价会保留。移除后必须重新邀请。`)) return;
+    void perform(async (client, current) => {
+      const result = await client.rpc("manage_company_member", { target_company: current.companyId, employee_id: member.user_id, action });
+      if (result.error) throw result.error;
+      return `${label}已完成。`;
+    });
+  }
+
   return <main className="page accountPage">
     <Link href="/account">← 公司账号</Link>
     <h1>员工与邀请</h1>
-    <p className="notice">每位员工使用自己的邮箱登录。销售员默认只可查阅和分享，可单独授权产品管理（新增、编辑、删除），不会变成管理员。报价目前仍保存在各自浏览器。停用会撤销全部公司访问权限，但不删除产品，也不能收回已经下载或分享的资料。</p>
     <button disabled={busy || loading} onClick={() => void load()}>刷新员工与邀请</button>
     {loading && <p role="status">正在读取员工资料…</p>}
     {error && <p className="accountError" role="alert">{error}</p>}
@@ -151,10 +160,10 @@ export default function TeamPage() {
       {!loading && <>
         <section className="accountCard"><h2>公司成员（{members.length}）</h2>
           {members.map(member => <div className="teamRow" key={member.user_id}>
-            <div><strong>{member.email || "邮箱不可用"}</strong><p>{member.role === "admin" ? "管理员" : "销售员"} · {member.active ? "可访问" : "已停用"}{member.user_id === context.userId && " · 你"}</p>
+            <div><strong>{member.display_name || member.email || "姓名待补填"}</strong><p>{member.email}</p><p>{memberLabel(member)} · {member.removed_at ? "已移除" : member.active ? "可访问" : "已停用"}{member.user_id === context.userId && " · 你"}</p>
               {member.role === "admin" ? <p>产品管理：始终允许（管理员）</p> : <>
                 <label className="teamPermission">
-                  <input type="checkbox" aria-label={`${member.email} 的产品管理权限`} checked={member.can_manage_products === true} disabled={busy} onChange={e => {
+                  <input type="checkbox" aria-label={`${member.email} 的产品管理权限`} checked={member.can_manage_products === true} disabled={busy || !!member.removed_at} onChange={e => {
                     const enabled = e.target.checked;
                     if (!window.confirm(`${enabled ? "允许" : "收回"} ${member.email} 在 ${context.name} 的产品管理权限（新增、编辑、删除）？不会改变管理员角色或账号停用状态。`)) return;
                     void perform(async (client, current) => {
@@ -168,14 +177,11 @@ export default function TeamPage() {
                 {!member.active && <p>账号已停用，此权限暂不生效；恢复访问后按当前设置生效。</p>}
               </>}
             </div>
-            {member.role === "sales" && member.user_id !== context.userId && <button disabled={busy} onClick={() => {
-              if (!window.confirm(`${member.active ? "停用" : "恢复"} ${member.email} 在 ${context.name} 的访问权限？公司产品会保留。`)) return;
-              void perform(async (client, current) => {
-                const result = await client.rpc("set_employee_active", { target_company: current.companyId, employee_id: member.user_id, enabled: !member.active });
-                if (result.error) throw result.error;
-                return member.active ? "员工的公司权限已停用。已打开的页面会在重新检查权限时更新，已分享内容无法撤回。" : "员工的公司权限已恢复，请让员工刷新公司云端产品。";
-              });
-            }}>{member.active ? "停用权限" : "恢复权限"}</button>}
+            {!member.removed_at && !member.is_primary && member.user_id !== context.userId && (member.role === "sales" || context.isPrimary) && <div className="cloudButtons">
+              <button disabled={busy || loading} onClick={() => manage(member, member.active ? "disable" : "enable", member.active ? "停用员工" : "恢复员工")}>{member.active ? "停用员工" : "恢复员工"}</button>
+              <button disabled={busy || loading} onClick={() => manage(member, "remove", "移除员工")}>移除员工</button>
+              {context.isPrimary && <button disabled={busy || loading || !member.active} onClick={() => manage(member, member.role === "admin" ? "demote" : "promote", member.role === "admin" ? "撤销副管理员" : "设为副管理员")}>{member.role === "admin" ? "撤销副管理员" : "设为副管理员"}</button>}
+            </div>}
           </div>)}
         </section>
         <section className="accountCard"><h2>邀请记录</h2>

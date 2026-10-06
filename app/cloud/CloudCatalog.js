@@ -175,7 +175,7 @@ export default function CloudCatalogPage() {
         {context?.role === "admin" && <Link href={`/brand?company=${context.companyId}`}>公司品牌</Link>}
       </div>
       {loading && <p role="status">正在读取云端产品…</p>}
-      {!loading && !context && !error && <p><Link href="/account">请先登录并创建或加入公司</Link></p>}
+      {!loading && !context && !error && <p><Link href="/account">请登录并接受公司邀请</Link></p>}
       {context && context.memberships.length > 1 && <label>当前公司 <select value={context.companyId} disabled={busy} onChange={e => { window.location.assign(`/cloud?company=${e.target.value}`); }}>
         {context.memberships.map(m => <option key={m.company_id} value={m.company_id}>{m.companies?.name}</option>)}
       </select></label>}

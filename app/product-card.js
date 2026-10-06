@@ -85,7 +85,7 @@ export async function createProductCard(item, company) {
     }
     const blob = await canvasBlob(canvas, "image/jpeg", 0.92);
     const code = item.serial.replace(/[^\w-]/g, "_").slice(0, 60) || "product";
-    return new File([blob], `SalesGo-${code}-product-card.jpg`, { type: "image/jpeg" });
+    return new File([blob], `JomSales-${code}-product-card.jpg`, { type: "image/jpeg" });
   } finally {
     canvas.width = 0;
     canvas.height = 0;

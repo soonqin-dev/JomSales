@@ -19,7 +19,7 @@ export async function proxy(request) {
   let user = null;
   try { const result = await client.auth.getUser(); if (!result.error) user = result.data.user; }
   catch { /* Fail closed on network/auth failures. */ }
-  const publicPage = ["/account", "/join", "/auth/callback"].includes(request.nextUrl.pathname);
+  const publicPage = ["/account", "/join", "/auth/callback", "/auth/reset"].includes(request.nextUrl.pathname);
   if (!publicPage && !user) {
     const redirected = NextResponse.redirect(new URL("/account", request.url));
     response.cookies.getAll().forEach(cookie => redirected.cookies.set(cookie));
@@ -30,4 +30,4 @@ export async function proxy(request) {
   return response;
 }
 
-export const config = { matcher: ["/", "/account", "/join", "/auth/callback", "/cloud", "/team", "/brand", "/quotations", "/migration"] };
+export const config = { matcher: ["/", "/account", "/join", "/auth/callback", "/auth/reset", "/settings", "/platform", "/cloud", "/team", "/brand", "/quotations", "/migration"] };

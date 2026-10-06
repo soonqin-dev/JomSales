@@ -29,7 +29,7 @@ function List({ context }) {
   }
   const term = search.trim().toLowerCase();
   const visible = rows.filter(row => (status === "all" || row.status === status) &&
-    (!term || [row.number, row.customer_name, row.creator_email].some(value => (value || "").toLowerCase().includes(term))));
+    (!term || [row.number, row.customer_name, row.creator_name, row.creator_email].some(value => (value || "").toLowerCase().includes(term))));
   return <>
     <Link href={`/cloud?company=${context.companyId}`}>← 公司产品目录</Link><h1>{trash ? "报价回收站" : "已保存报价"}</h1>
     <p>{context.name} · {context.role === "admin" ? "管理员可管理本公司全部报价，并查看所属员工。" : "仅显示你自己的报价。"}</p>
@@ -49,7 +49,7 @@ function List({ context }) {
     {!loading && !error && !visible.length && <p>{trash ? "回收站没有符合条件的报价。" : "没有符合条件的已保存报价。"}</p>}
     {visible.map(row => <article className="accountCard quotationHistoryRow" key={row.id}>
       <strong>{row.number}</strong><p>{row.customer_name || "未填写客户"} · {row.quote_date}</p>
-      <p>所属员工：{row.creator_email || row.created_by}{row.created_by === context.userId ? "（我）" : ""}</p>
+      <p>所属员工：{row.creator_name || row.creator_email || row.created_by}{row.created_by === context.userId ? "（我）" : ""}</p>
       <p>状态：{row.status === "success" ? "Success · 已成交（不代表已收款）" : "Pending · 待客户确认"}</p>
       <div className="cloudButtons">
         {trash ? <>

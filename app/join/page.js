@@ -28,7 +28,7 @@ export default function JoinPage() {
       if (version !== generation.current) return;
       identity.current = auth.data.user?.id || null; setUser(auth.data.user || null);
       if (!auth.data.user) return;
-      const result = await client.rpc("get_employee_invite", { invite_token: token.current });
+      const result = await client.rpc("get_join_invitation", { invite_token: token.current });
       if (result.error) throw result.error;
       if (version === generation.current) {
         if (!result.data?.[0]) throw new Error("Invitation invalid.");
@@ -82,12 +82,12 @@ export default function JoinPage() {
     {!loading && !user && !error && <section className="accountCard">
       <h2>请先登录受邀邮箱</h2>
       <p>没有账号？使用管理员指定的邮箱注册并验证，再回到这里接受邀请。员工无需创建公司。</p>
-      <p><Link href="/account">注册／登录员工账号 →</Link></p>
+      <p><Link href="/account">注册／登录 →</Link></p>
       <p>如果验证邮件在另一浏览器或标签页打开，请验证后重新打开原始邀请链接。</p>
     </section>}
     {user && !joined && <p>当前账号：{user.email}。<Link href="/account">需要换账号？前往退出并重新登录</Link></p>}
     {!loading && invite && <section className="accountCard">
-      <h2>{invite.company_name}</h2><p>受邀邮箱：{invite.email}</p><p>角色：销售员（默认只读，产品管理权限由管理员设置）</p>
+      <h2>{invite.company_name}</h2><p>受邀邮箱：{invite.email}</p><p>角色：{invite.invite_role === "primary" ? "正管理员（由平台开通）" : "销售员（默认只读，产品管理权限由管理员设置）"}</p>
       <p>{invite.already_accepted ? "你曾接受此邀请，将重新确认当前权限。" : `到期：${new Date(invite.expires_at).toLocaleString()}`}</p>
       <button disabled={busy} onClick={() => void accept()}>{busy ? "正在加入…" : invite.already_accepted ? "确认公司访问权限" : "接受邀请并加入公司"}</button>
     </section>}
