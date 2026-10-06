@@ -5,6 +5,7 @@ import { createClient } from "../../lib/supabase/client";
 import useCompanyScope from "../use-company-scope";
 import { parseCsv, guessMapping, previewCsv, CSV_FIELDS, csvTemplate } from "../../lib/product-csv";
 import { downloadFile } from "../share";
+import PriceUpdate from "./PriceUpdate";
 
 function csvCell(value) {
   let text = String(value ?? "");
@@ -16,6 +17,7 @@ function Editor({ context }) {
   const [busy, setBusy] = useState(false), [importing, setImporting] = useState(false), [error, setError] = useState(""), [message, setMessage] = useState("");
   const [text, setText] = useState(""), [filename, setFilename] = useState(""), [delimiter, setDelimiter] = useState(","), [parsed, setParsed] = useState(null), [mapping, setMapping] = useState({});
   const [preview, setPreview] = useState(null), [results, setResults] = useState({}), [progress, setProgress] = useState(0);
+  const [priceBusy,setPriceBusy]=useState(false);
   const working = useRef(false), sequence = useRef(0), importId = useRef(null), started = useRef(false), stop = useRef(false), resultRef = useRef({});
   async function rpc(name, args) { const result = await createClient().rpc(name, args); if (result.error) throw result.error; return result.data; }
   async function run(task) {
@@ -103,6 +105,7 @@ function Editor({ context }) {
   return <>
     <Link href={`/cloud?company=${context.companyId}`}>← 产品目录</Link><h1>目录设置与导入</h1><p>{context.name}</p>
     {error && <p role="alert" className="accountError">{error}</p>}{message && <p role="status">{message}</p>}
+    <fieldset className="productFields" disabled={priceBusy}>
     <details className="accountCard"><summary>产品编号设置</summary>
       {!settings && <button disabled={busy} onClick={readNumbers}>读取编号设置</button>}
       {numberDraft && <form onSubmit={e => { e.preventDefault(); void run(async () => {
@@ -136,6 +139,8 @@ function Editor({ context }) {
         {preview.slice(0,20).map(row => <div className="teamRow" key={row.row_number}><div><strong>CSV 第 {row.csv_line} 行 · {row.fields?.serial || row.raw_serial || "编号无效"}</strong><p>{row.fields?.name || row.raw_name} · {row.fields?.price} / {row.fields?.unit}</p><p>{row.error || (row.duplicate ? "已有编号，将跳过" : results[row.row_number]?.message || results[row.row_number]?.status || "待确认新增")}</p></div></div>)}
       </>}
     </section>
+    </fieldset>
+    <PriceUpdate context={context} blocked={busy} onBusyChange={setPriceBusy}/>
   </>;
 }
 export default function CatalogSettings() {
