@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { MAX_QUANTITY, MAX_UNIT_PRICE, formatMoney, lineCents, moneyToCents,
-  quotationTotals } from "./quotation-utils";
+  quotationTotals, quantityToMillis } from "./quotation-utils";
 import { canShareFile, downloadFile } from "./share";
 const signature = (items, details, company, edits = {}) => JSON.stringify({ items, details,
   company: { name: company.name, contact: company.contact, logo_path: company.logo_path }, edits });
@@ -20,8 +20,7 @@ export default function Quotation({ quotation, context, onBack, onComplete }) {
   const invalidRows = items.some(item => {
     const draft = edits[item.product.id];
     return lineCents(item) === null || (draft && (
-      !/^\d+$/.test(draft.quantity) || Number(draft.quantity) < 1 ||
-      Number(draft.quantity) > MAX_QUANTITY || moneyToCents(draft.unitPrice) === null ||
+      quantityToMillis(draft.quantity) === null || moneyToCents(draft.unitPrice) === null ||
       Number(draft.unitPrice) > MAX_UNIT_PRICE
     ));
   });
@@ -34,8 +33,7 @@ export default function Quotation({ quotation, context, onBack, onComplete }) {
       ...edits[item.product.id], [field]: value };
     setEdits(prev => ({ ...prev, [item.product.id]: draft }));
     setMessage("");
-    if (!/^\d+$/.test(draft.quantity) || Number(draft.quantity) < 1 ||
-        Number(draft.quantity) > MAX_QUANTITY || moneyToCents(draft.unitPrice) === null ||
+    if (quantityToMillis(draft.quantity) === null || moneyToCents(draft.unitPrice) === null ||
         Number(draft.unitPrice) > MAX_UNIT_PRICE) { quotation.markDirty(); return; }
     const next = { ...item, quantity: Number(draft.quantity), unitPrice: Number(draft.unitPrice) };
     next.lineTotal = lineCents(next) / 100;
@@ -141,20 +139,20 @@ export default function Quotation({ quotation, context, onBack, onComplete }) {
               const draft = edits[item.product.id];
               const quantity = draft?.quantity ?? String(item.quantity);
               const unitPrice = draft?.unitPrice ?? String(item.unitPrice);
-              const quantityInvalid = !/^\d+$/.test(quantity) || Number(quantity) < 1 || Number(quantity) > MAX_QUANTITY;
+              const quantityInvalid = quantityToMillis(quantity) === null;
               const priceInvalid = moneyToCents(unitPrice) === null || Number(unitPrice) > MAX_UNIT_PRICE;
               return (
                 <article className="quotationItem" key={item.product.id}>
                   <div className="quotationItemHeading">
-                    <div><h3>{item.product.name}</h3><p>{item.product.serial}</p></div>
+                    <div><h3>{item.product.name}</h3><p>{item.product.serial} · {item.product.unit || "件"}{item.product.is_service && " · 服务"}</p>{item.product.description && <p>{item.product.description}</p>}</div>
                     <button type="button" className="deleteButton" aria-label={`移除 ${item.product.name}`}
                       onClick={() => removeItem(item.product.id)}>移除</button>
                   </div>
                   <div className="quotationItemInputs">
-                    <label>数量
-                      <input type="number" min="1" max={MAX_QUANTITY} step="1" required
+                    <label>数量（{item.product.unit || "件"}）
+                      <input type="number" min="0.001" max={MAX_QUANTITY} step="0.001" required
                         aria-label={`${item.product.serial} 数量`} aria-invalid={quantityInvalid}
-                        inputMode="numeric" value={quantity} onChange={e => updateLine(item, "quantity", e.target.value)} />
+                        inputMode="decimal" value={quantity} onChange={e => updateLine(item, "quantity", e.target.value)} />
                     </label>
                     <label>单价（RM）
                       <input type="number" min="0" max={MAX_UNIT_PRICE} step="0.01" required
@@ -162,7 +160,7 @@ export default function Quotation({ quotation, context, onBack, onComplete }) {
                         inputMode="decimal" value={unitPrice} onChange={e => updateLine(item, "unitPrice", e.target.value)} />
                     </label>
                   </div>
-                  {(quantityInvalid || priceInvalid) && <p className="quotationError">数量须为正整数，单价须为非负金额，最多两位小数。</p>}
+                  {(quantityInvalid || priceInvalid) && <p className="quotationError">数量须大于零，最多三位小数；单价须为非负金额，最多两位小数。</p>}
                   <div className="lineTotal">行金额 <strong>{quantityInvalid || priceInvalid ? "—" : formatMoney(lineCents(item))}</strong></div>
                 </article>
               );

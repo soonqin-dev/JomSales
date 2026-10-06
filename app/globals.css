@@ -889,6 +889,10 @@ form small {
   margin: 6px 0 14px;
 }
 .accountCard summary { cursor: pointer; min-height: 44px; padding: 10px 0; }
+.accountCard fieldset { min-width: 0; }
+.accountCard fieldset > label, .productFields details > label { display: grid; gap: 6px; margin: 10px 0; }
+.productFields select, .productFields textarea { width: 100%; min-height: 44px; padding: 10px; font: inherit; border: 1px solid var(--border); border-radius: 6px; background: white; }
+.productFields summary { min-height: 44px; padding: 10px 0; cursor: pointer; }
 .teamRow button { min-height: 44px; }
 .teamPermission { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-top: 8px; font-size: 14px; }
 .accountCard .teamPermission input { width: 20px; height: 20px; padding: 0; margin: 0; flex-shrink: 0; accent-color: var(--blue); }

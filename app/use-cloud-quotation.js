@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "../lib/supabase/client";
 import { readBrand, readQuotation, newDraft, saveQuotation, signedBrand } from "../lib/supabase/workspace";
-import { MAX_QUANTITY } from "./quotation-utils";
+import { MAX_QUANTITY, quantityToMillis, lineCents } from "./quotation-utils";
 
 export default function useCloudQuotation(context) {
   const [draft, setDraft] = useState(null);
@@ -82,9 +82,12 @@ export default function useCloudQuotation(context) {
     const value = current.current;
     if (!value || working.current) return;
     const existing = value.items.find(line => line.product.id === product.id);
-    if (existing?.quantity >= MAX_QUANTITY || (!existing && value.items.length >= 200)) { setError("报价数量或产品行数已达到上限。"); return; }
-    const items = existing ? value.items.map(line => line.product.id === product.id ? { ...line, quantity: line.quantity + 1, lineTotal: (line.quantity + 1) * line.unitPrice } : line)
-      : [...value.items, { product: { id: product.id, serial: product.serial, name: product.name }, quantity: 1, unitPrice: Number(product.price), lineTotal: Number(product.price) }];
+    if ((existing && (quantityToMillis(existing.quantity) === null || quantityToMillis(existing.quantity) + 1000 > MAX_QUANTITY * 1000)) || (!existing && value.items.length >= 200)) { setError("报价数量或产品行数已达到上限。"); return; }
+    const items = existing ? value.items.map(line => {
+      if (line.product.id !== product.id) return line;
+      const next = { ...line, quantity: (quantityToMillis(line.quantity) + 1000) / 1000 };
+      return { ...next, lineTotal: lineCents(next) / 100 };
+    }) : [...value.items, { product: { id: product.id, serial: product.serial, name: product.name, unit: product.unit || "件", description: product.description || "", is_service: product.is_service === true }, quantity: 1, unitPrice: Number(product.price), lineTotal: Number(product.price) }];
     edit(prev => ({ ...prev, items })); return true;
   }
 

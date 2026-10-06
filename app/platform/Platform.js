@@ -125,8 +125,8 @@ export default function Platform() {
           <label htmlFor="service-until">服务截止时间（本地时间，留空不设期限）</label><input id="service-until" type="datetime-local" value={draft.until} disabled={busy} onChange={e => setDraft({ ...draft, until: e.target.value })} />
           <label htmlFor="plan-name">配套</label><select id="plan-name" value={draft.plan} disabled={busy} onChange={e => setDraft({ ...draft, plan: e.target.value })}>{["Lite","Pro","Premium","Customize"].map(plan => <option key={plan}>{plan}</option>)}</select>
           <label htmlFor="seat-limit">成员额度（含管理员及停用成员；留空不限制）</label><input id="seat-limit" type="number" min={1} max={100000} value={draft.seats} disabled={busy} onChange={e => setDraft({ ...draft, seats: e.target.value })} />
-          <details><summary>预留配套配置</summary><p>本批仅保存产品、容量和功能配置，尚未作为对应功能的收费限制。</p>
-            <label htmlFor="product-cap">产品额度</label><input id="product-cap" type="number" min={1} max={10000000} value={draft.products} disabled={busy} onChange={e => setDraft({ ...draft, products: e.target.value })} />
+          <label htmlFor="product-cap">产品额度（留空不限制；超过额度不删除旧产品）</label><input id="product-cap" type="number" min={1} max={10000000} value={draft.products} disabled={busy} onChange={e => setDraft({ ...draft, products: e.target.value })} />
+          <details><summary>预留配套配置</summary><p>容量和功能配置暂只保存，尚未作为对应功能的收费限制。</p>
             <label htmlFor="storage-cap">图片额度（MB）</label><input id="storage-cap" type="number" min={1} max={100000000} value={draft.storage} disabled={busy} onChange={e => setDraft({ ...draft, storage: e.target.value })} />
             <label htmlFor="feature-config">功能配置（JSON，预留）</label><textarea id="feature-config" maxLength={3000} rows={4} value={draft.features} disabled={busy} onChange={e => setDraft({ ...draft, features: e.target.value })} />
           </details><button disabled={busy || loading}>保存公司设置</button>

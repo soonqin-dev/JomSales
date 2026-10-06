@@ -34,7 +34,7 @@ function blobDataUrl(blob) {
   });
 }
 
-export async function prepareUploadImage(file) {
+export async function prepareUploadImage(file, { maxSide = MAX_IMAGE_SIDE } = {}) {
   const accepted = ["image/jpeg", "image/jpg", "image/png", "image/webp"];
   const type = (file.type || "").toLowerCase();
   const isHeic = /^image\/(heic|heif)(-sequence)?$/.test(type) || /\.(heic|heif)$/i.test(file.name);
@@ -55,7 +55,7 @@ export async function prepareUploadImage(file) {
     if (image.naturalWidth * image.naturalHeight > MAX_IMAGE_PIXELS) {
       throw new Error("图片分辨率过大，请先缩小至 4000 万像素以内。");
     }
-    const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(image.naturalWidth, image.naturalHeight));
+    const scale = Math.min(1, maxSide / Math.max(image.naturalWidth, image.naturalHeight));
     canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
     canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
     const ctx = canvas.getContext("2d");

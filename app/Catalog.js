@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Quotation from "./Quotation";
 import { MAX_UNIT_PRICE, moneyToCents } from "./quotation-utils";
@@ -13,7 +13,7 @@ export default function Catalog({ cloud, quotation }) {
   const [saving, setSaving] = useState(false);
   const [editingRecord, setEditingRecord] = useState(null);
   const pendingId = useRef(null);
-  const [query, setQuery] = useState("");
+  const query = cloud.query || "", setQuery = cloud.search;
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [imageLoading, setImageLoading] = useState(false);
@@ -36,12 +36,15 @@ export default function Catalog({ cloud, quotation }) {
   const [completedPdf, setCompletedPdf] = useState(null);
   const [pdfMessage, setPdfMessage] = useState("");
   const detailDialog = useRef(null);
+  const detailAttempt = useRef(0);
 
   const [serial, setSerial] = useState("");
   const [name, setName] = useState("");
   const [tags, setTags] = useState("");
   const [price, setPrice] = useState("");
   const [image, setImage] = useState("");
+  const [thumbnail, setThumbnail] = useState("");
+  const [unit, setUnit] = useState("件"), [category, setCategory] = useState(""), [description, setDescription] = useState(""), [service, setService] = useState(false);
 
   useEffect(() => {
     if (!cloud.canManage) { resetForm(); setOpen(false); }
@@ -51,7 +54,7 @@ export default function Catalog({ cloud, quotation }) {
     if (!cloud || !selectedProduct) return;
     const latest = items.find(item => item.id === selectedProduct.id);
     if (!latest) setSelectedProduct(null);
-    else if (latest.image !== selectedProduct.image || latest.revision !== selectedProduct.revision) setSelectedProduct(latest);
+    else if (latest.revision !== selectedProduct.revision) setSelectedProduct(null);
   }, [items, !!cloud, selectedProduct]);
 
   useEffect(() => {
@@ -82,12 +85,25 @@ export default function Catalog({ cloud, quotation }) {
     };
   }, [selectedProduct]);
 
-  const quotationCount = quotationItems.reduce((sum, item) => sum + item.quantity, 0);
+  useEffect(() => {
+    if (!selectedProduct) return;
+    let cancelled = false;
+    const timer = setInterval(async () => {
+      try { const full = await cloud.detail(selectedProduct); if (!cancelled) setSelectedProduct(full); }
+      catch (err) { if (!cancelled) setDetailMessage(`图片续期失败：${err.message}`); }
+    }, 120000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [selectedProduct?.id]);
 
-  function openProductDetail(item) {
+  const quotationCount = quotationItems.length;
+
+  async function openProductDetail(item) {
+    const attempt = ++detailAttempt.current;
     setDetailMessage("");
     setProductCard(null);
-    setSelectedProduct(item);
+    setCatalogError("");
+    try { const full = await cloud.detail(item); if (attempt === detailAttempt.current) setSelectedProduct(full); }
+    catch (err) { if (attempt === detailAttempt.current) setCatalogError(err.message); }
   }
 
   async function shareProductCard() {
@@ -130,16 +146,7 @@ export default function Catalog({ cloud, quotation }) {
     setDetailMessage(added ? "已加入当前报价，生成／分享时自动保存。" : "未能加入，请查看报价错误提示。");
   }
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((item) => {
-      const hay = [item.serial, item.name, ...(item.tags || [])]
-        .join(" ")
-        .toLowerCase();
-      return hay.includes(q);
-    });
-  }, [items, query]);
+  const filtered = items; // Search and pagination are authoritative cloud results.
 
   function resetForm() {
     imageUploadToken.current += 1;
@@ -153,9 +160,15 @@ export default function Catalog({ cloud, quotation }) {
     setTags("");
     setPrice("");
     setImage("");
+    setThumbnail(""); setUnit("件"); setCategory(""); setDescription(""); setService(false);
   }
 
-  function editItem(item) {
+  async function editItem(item) {
+    if (saving) return;
+    setSaving(true); setCatalogError("");
+    try { item = await cloud.detail(item); }
+    catch (err) { setCatalogError(err.message); return; }
+    finally { setSaving(false); }
     resetForm();
     setEditingId(item.id);
     setEditingRecord(item);
@@ -164,6 +177,7 @@ export default function Catalog({ cloud, quotation }) {
     setTags((item.tags || []).join(", "));
     setPrice(String(item.price));
     setImage(item.image || "");
+    setUnit(item.unit || "件"); setCategory(item.category || ""); setDescription(item.description || ""); setService(item.is_service === true);
     setOpen(true);
   }
 
@@ -175,7 +189,7 @@ export default function Catalog({ cloud, quotation }) {
 
   async function addItem(e) {
     e.preventDefault();
-    if (saving || imageLoading || !serial.trim() || !name.trim() || !price.trim()) return;
+    if (saving || imageLoading || !name.trim() || !price.trim() || (editingId && !serial.trim())) return;
 
     const priceCents = moneyToCents(price.trim().replace(/^\./, "0."));
     if (priceCents === null || priceCents / 100 > MAX_UNIT_PRICE) {
@@ -192,7 +206,7 @@ export default function Catalog({ cloud, quotation }) {
         .map((x) => x.trim())
         .filter(Boolean),
       price: (priceCents / 100).toFixed(2),
-      image
+      image, thumbnail, unit, category, description, is_service: service
     };
 
     setSaving(true);
@@ -219,7 +233,8 @@ export default function Catalog({ cloud, quotation }) {
     setFormError("");
     try {
       const converted = await prepareUploadImage(file);
-      if (imageUploadToken.current === token) setImage(converted);
+      const small = await prepareUploadImage(await (await fetch(converted)).blob(), { maxSide: 320 });
+      if (imageUploadToken.current === token) { setImage(converted); setThumbnail(small); }
     } catch (err) {
       if (imageUploadToken.current === token) setFormError(err.message || "图片转换失败，请重试。");
     } finally {
@@ -242,7 +257,7 @@ export default function Catalog({ cloud, quotation }) {
           <p>Mobile Sales Catalog &amp; Quotation Tool</p>
           <p>移动产品目录与报价工具</p>
         </div>
-        <div className="badge">{items.length} 项产品</div>
+        <div className="badge">{cloud.total || 0} 项产品</div>
       </section>
 
       <div className="notice">
@@ -254,7 +269,7 @@ export default function Catalog({ cloud, quotation }) {
 
       <div className="quotationSummary" role="status" aria-live="polite">
         <button type="button" className="quotationCartButton" disabled={!quotationReady} onClick={viewQuotation}>
-          <span>报价清单：<strong>{quotationCount} 件</strong></span>
+          <span>报价清单：<strong>{quotationCount} 项</strong></span>
           <span>查看 / 生成报价 →</span>
         </button>
         <button type="button" className="saveButton newQuotationButton"
@@ -282,6 +297,8 @@ export default function Catalog({ cloud, quotation }) {
         <input
           className="search"
           value={query}
+          maxLength={240}
+          disabled={saving || cloud.busy}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="搜索产品编号、名称、标签..."
           aria-label="搜索产品"
@@ -298,14 +315,14 @@ export default function Catalog({ cloud, quotation }) {
       </button>}
 
       <section className="list">
-        {filtered.length === 0 ? (
+        {cloud.loading ? <p role="status">正在搜索公司目录…</p> : filtered.length === 0 ? (
           <div className="empty">没有找到符合的产品。</div>
         ) : (
           filtered.map((item) => (
             <article className="card" key={item.id} onClick={() => openProductDetail(item)}>
               <div className="thumb">
                 {item.image ? (
-                  <img src={item.image} alt={item.name} />
+                  <img src={item.image} alt={item.name} loading="lazy" decoding="async" />
                 ) : (
                   <div className="placeholder">NO PHOTO</div>
                 )}
@@ -329,6 +346,7 @@ export default function Catalog({ cloud, quotation }) {
                 </div>
 
                 <div className="serial">产品编号：{item.serial}</div>
+                <div className="serial">{item.unit || "件"}{item.is_service && " · 服务"}{item.category && ` · ${item.category}`}</div>
                 {item.imageError && <p className="accountError">{item.imageError}</p>}
 
                 {!!item.tags?.length && (
@@ -370,6 +388,8 @@ export default function Catalog({ cloud, quotation }) {
           ))
         )}
       </section>
+      <div className="cloudButtons"><button disabled={!cloud.page || cloud.loading || saving || cloud.busy} onClick={cloud.previous}>上一页</button>
+        <span>第 {(cloud.page || 0) + 1} 页 · 每页最多 50 项</span><button disabled={!cloud.hasMore || cloud.loading || saving || cloud.busy} onClick={cloud.next}>下一页</button></div>
 
       {selectedProduct && (
         <dialog
@@ -414,6 +434,8 @@ export default function Catalog({ cloud, quotation }) {
           <h2 id="productDetailTitle">{selectedProduct.name}</h2>
           {selectedProduct.imageError && <p className="accountError" role="alert">{selectedProduct.imageError} 含照片卡片暂不可生成。</p>}
           <p className="detailCode">Product Code: {selectedProduct.serial}</p>
+          <p>{selectedProduct.unit || "件"}{selectedProduct.is_service && " · 服务"}{selectedProduct.category && ` · ${selectedProduct.category}`}</p>
+          {selectedProduct.description && <p>{selectedProduct.description}</p>}
           {!!selectedProduct.tags?.length && (
             <div className="tags detailTags">
               {selectedProduct.tags.map((tag, i) => (
@@ -469,14 +491,22 @@ export default function Catalog({ cloud, quotation }) {
               <fieldset disabled={saving} className="productFields">
               {editingRecord?.imageError && <p className="accountError">{editingRecord.imageError} 只修改文字会保留云端照片路径；请上传新照片以修复。</p>}
               <label>
-                产品编号 *
+                产品编号{editingId ? " *" : "（留空自动编号）"}
                 <input
                   value={serial}
                   onChange={(e) => setSerial(e.target.value)}
                   placeholder="例如 P-003"
-                  required
+                  required={!!editingId}
+                  maxLength={120}
                 />
               </label>
+
+              <details><summary>单位、分类与说明（可选）</summary>
+                <label>单位<input value={unit} maxLength={30} placeholder="件、盒、米、公斤、小时" onChange={e => setUnit(e.target.value)} /></label>
+                <label>分类<input value={category} maxLength={80} onChange={e => setCategory(e.target.value)} /></label>
+                <label>说明<textarea rows={3} value={description} maxLength={2000} onChange={e => setDescription(e.target.value)} /></label>
+                <label>项目类型<select value={service ? "service" : "product"} onChange={e => setService(e.target.value === "service")}><option value="product">商品</option><option value="service">服务／人工</option></select></label>
+              </details>
 
               <label>
                 名称 *
@@ -504,6 +534,7 @@ export default function Catalog({ cloud, quotation }) {
                   <span>RM</span>
                   <input
                     value={price}
+                    aria-label="产品单价（RM）"
                     onChange={(e) => setPrice(e.target.value)}
                     inputMode="decimal"
                     placeholder="0.00"
@@ -516,6 +547,7 @@ export default function Catalog({ cloud, quotation }) {
                 照片
                 <input
                   type="file"
+                  aria-label="产品照片"
                   accept="image/jpeg,image/png,image/webp,image/heic,image/heif,.jpg,.jpeg,.png,.webp,.heic,.heif"
                   onChange={(e) => {
                     const file = e.target.files?.[0];
@@ -532,6 +564,7 @@ export default function Catalog({ cloud, quotation }) {
                 setImageLoading(false);
                 setFormError("");
                 setImage("");
+                setThumbnail("");
               }}>移除照片</button>}
               {formError && <p className="quotationError" role="alert">{formError}</p>}
 

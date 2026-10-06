@@ -14,7 +14,9 @@ function createFixture(port=54329) {
     {id:uuid(21),company_id:CB,serial:"B-001",name:"Company B only",tags:[],price:20,image_path:null,revision:1,source_key:null,deleted_at:null,created_at:new Date().toISOString()}];
   const quotations=[],files=new Set([image]),tokens=new Map(),refreshTokens=new Map(),requests=[];
   const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZHkAAAAASUVORK5CYII=","base64");
-  const state={failQuote:false,failBrand:false,failSign:false};
+  const state={failQuote:false,failBrand:false,failSign:false,failImport:false,failProductReply:false};
+  const numbering=new Map(),reservations=new Map(),importResults=new Map();
+  const numberSettings=co=>{if(!numbering.has(co))numbering.set(co,{company_id:co,automatic:true,prefix:"P-",digits:5,next_number:1,revision:1});return numbering.get(co);};
   function session(user) {
     const access_token=`${encode({alg:"HS256",typ:"JWT"})}.${encode({sub:user.id,exp:Math.floor(Date.now()/1000)+3600,role:"authenticated"})}.${randomUUID()}`;
     const refresh_token=randomUUID();tokens.set(access_token,user);refreshTokens.set(refresh_token,user);
@@ -45,7 +47,8 @@ function createFixture(port=54329) {
         if(method==="POST") {
           if(!writer(body.company_id)||(body.source_key&&member(body.company_id)?.role!=="admin"))throw Error("Permission denied");
           if(products.some(p=>p.id===body.id||(!p.deleted_at&&p.company_id===body.company_id&&p.serial===body.serial)))throw Error("Duplicate product");
-          const row={...body,revision:1,deleted_at:null,created_at:new Date().toISOString()};products.unshift(row);data=[row];
+          const row={unit:"件",category:"",description:"",is_service:false,...body,price:Number(body.price),revision:1,deleted_at:null,created_at:new Date().toISOString()};products.unshift(row);data=[row];
+          if(state.failProductReply){state.failProductReply=false;throw Error("Simulated lost product reply");}
         } else if(method==="PATCH")data=matching.filter(p=>writer(p.company_id)).map(p=>Object.assign(p,body,{revision:p.revision+1}));
         else data=matching;
       } else if(path==="/rest/v1/quotations") {
@@ -57,6 +60,39 @@ function createFixture(port=54329) {
           const co=companies.find(c=>c.id===body.company_id),row={...body,created_by:user.id,creator_email:user.email,status:"pending",deleted_at:null,company_snapshot:{name:co.name,contact:co.contact,logo_path:co.logo_path},revision:1,updated_at:new Date().toISOString(),created_at:new Date().toISOString()};quotations.unshift(row);data=[row];
         }else if(method==="PATCH")data=matching.filter(q=>!q.deleted_at).map(q=>Object.assign(q,body,{revision:q.revision+1,updated_at:new Date().toISOString()}));
         else data=matching.sort((a,b)=>b.updated_at.localeCompare(a.updated_at));
+      } else if(path==="/rest/v1/rpc/is_platform_admin")data=false;
+      else if(path==="/rest/v1/rpc/search_company_products") {
+        if(!member(body.target_company))throw Error("Company access denied");
+        if(body.search_text==="slow")await new Promise(resolve=>setTimeout(resolve,800));
+        const matches=products.filter(p=>p.company_id===body.target_company&&!p.deleted_at&&[p.serial,p.name,p.category,p.description,...(p.tags||[])].join(" ").toLowerCase().includes(body.search_text.toLowerCase()))
+          .sort((a,b)=>b.created_at.localeCompare(a.created_at)||a.id.localeCompare(b.id));
+        const after=matches.filter(p=>!body.after_created||p.created_at<body.after_created||(p.created_at===body.after_created&&p.id>body.after_id));
+        const items=after.slice(0,50);data={items,total:matches.length,has_more:after.length>50,cursor:items.length?{id:items.at(-1).id,created_at:items.at(-1).created_at}:null};
+      } else if(path==="/rest/v1/rpc/get_product_number_settings") {
+        if(member(body.target_company)?.role!=="admin")throw Error("Administrator access required");data=numberSettings(body.target_company);
+      } else if(path==="/rest/v1/rpc/save_product_number_settings") {
+        if(member(body.target_company)?.role!=="admin")throw Error("Administrator access required");
+        const settings=numberSettings(body.target_company);if(settings.revision!==body.expected_revision)throw Error("Settings changed");
+        data=Object.assign(settings,{automatic:body.auto_number,prefix:body.number_prefix,digits:body.number_digits,next_number:body.next_value,revision:settings.revision+1});
+      } else if(path==="/rest/v1/rpc/reserve_product_number") {
+        if(!writer(body.target_company))throw Error("Product permission required");
+        if(reservations.has(body.target_product))data=reservations.get(body.target_product);
+        else{const settings=numberSettings(body.target_company);if(!settings.automatic)throw Error("Automatic numbering disabled");
+          do{data=settings.prefix+String(settings.next_number++).padStart(settings.digits,"0");}while(products.some(p=>p.company_id===body.target_company&&p.serial===data)||[...reservations.values()].includes(data));
+          settings.revision++;reservations.set(body.target_product,data);}
+      } else if(path==="/rest/v1/rpc/check_product_import_codes") {
+        if(member(body.target_company)?.role!=="admin")throw Error("Administrator access required");
+        data=products.filter(p=>p.company_id===body.target_company&&!p.deleted_at&&body.codes.map(v=>v.toLowerCase()).includes(p.serial.toLowerCase())).map(p=>p.serial.toLowerCase());
+      } else if(path==="/rest/v1/rpc/import_products_batch") {
+        if(member(body.target_company)?.role!=="admin")throw Error("Administrator access required");
+        data=body.entries.map(entry=>{
+          const key=body.target_company+body.import_key+entry.row_number;
+          if(importResults.has(key))return {...importResults.get(key),replayed:true};
+          if(products.some(p=>p.company_id===body.target_company&&!p.deleted_at&&p.serial.toLowerCase()===entry.serial.toLowerCase()))return {row_number:entry.row_number,status:"duplicate"};
+          const product_id=randomUUID();products.unshift({...entry,id:product_id,company_id:body.target_company,price:Number(entry.price),revision:1,image_path:null,thumbnail_path:null,deleted_at:null,created_at:new Date().toISOString()});
+          const result={row_number:entry.row_number,status:"imported",product_id,replayed:false};importResults.set(key,result);return result;
+        });
+        if(state.failImport){state.failImport=false;throw Error("Simulated lost import reply");}
       } else if(path==="/rest/v1/rpc/manage_quotation") {
         const q=quotations.find(q=>q.id===body.target_quote&&q.company_id===body.target_company),m=member(body.target_company);
         if(!q||!m||(m.role!=="admin"&&q.created_by!==user.id))throw Error("Quotation access denied");

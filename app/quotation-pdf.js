@@ -152,7 +152,7 @@ export async function createQuotationPdf({ items, details, company }) {
     font(11);
     const codes = wrapped(item.product.serial, 98);
     font(12);
-    const names = wrapped(item.product.name, 290);
+    const names = wrapped([item.product.name, item.product.unit ? `单位：${item.product.unit}` : "", item.product.description || ""].filter(Boolean).join("\n"), 290);
     const count = Math.max(codes.length, names.length);
     let offset = 0;
     while (offset < count) {

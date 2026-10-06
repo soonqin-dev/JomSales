@@ -8,7 +8,7 @@ const { createFixture } = require("./workspace-browser-fixture.cjs");
 const encode = value => Buffer.from(JSON.stringify(value)).toString("base64url");
 const fixture = createFixture(), base = "http://localhost:54330", errors = [];
 const next = join(__dirname, "../node_modules/next/dist/bin/next");
-const env = { ...process.env, NEXT_PUBLIC_SUPABASE_URL: fixture.origin, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_local_test_fixture" };
+const env = { ...process.env, JOMSALES_BUILD_DIR: `.next-launchpad-workspace-${process.pid}`, NEXT_PUBLIC_SUPABASE_URL: fixture.origin, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_local_test_fixture" };
 let server, browser, diagnosticPage;
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function build() {
@@ -49,7 +49,7 @@ async function build() {
     async function generate(page) {
       const download = page.waitForEvent("download"); await button(page, "生成报价 PDF").click();
       assert((await download).suggestedFilename().endsWith(".pdf")); await page.locator(".activeQuotation").filter({ hasText: /^新报价$/ }).waitFor();
-      assert(!await page.getByRole("heading", { name: "报价清单", exact: true }).count()); assert.match(await page.locator(".quotationCartButton").innerText(), /0 件/);
+      assert(!await page.getByRole("heading", { name: "报价清单", exact: true }).count()); assert.match(await page.locator(".quotationCartButton").innerText(), /0 项/);
     }
     async function select(page, id) {
       await page.goto(base + "/quotations"); await page.locator(`a[href$="quote=${id}"]`).click(); await ready(page);
@@ -78,7 +78,7 @@ async function build() {
     const quote = fixture.quotations[0], quoteId = quote.id;
     assert.equal(quote.customer_name, "Cloud Client"); assert.equal(quote.items[0].quantity, 2); assert.equal(quote.discount, "5.00");
     assert.equal(quote.status, "pending"); assert.equal(quote.creator_email, "owner@example.test"); assert.equal(quote.company_snapshot.name, "Cloud Brand");
-    await page.reload(); await ready(page); assert.match(await page.locator(".quotationCartButton").innerText(), /0 件/);
+    await page.reload(); await ready(page); assert.match(await page.locator(".quotationCartButton").innerText(), /0 项/);
     if (process.env.SALESGO_TEST_SCREENSHOTS) await page.screenshot({ path: join(process.env.SALESGO_TEST_SCREENSHOTS, "salesgo-quotation-catalog-mobile.png"), fullPage: true });
     console.log("PASS new-by-default, memory cart, PDF autosave/download, reset and legacy originals preserved");
     await select(page, quoteId); await add(page); await editor(page); assert.equal(await page.getByLabel("P-001 数量", { exact: true }).inputValue(), "3");

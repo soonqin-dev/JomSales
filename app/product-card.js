@@ -26,9 +26,10 @@ export async function createProductCard(item, company) {
   const codeLines = wrapCanvasText(ctx, item.serial, available);
   font(24);
   const tagLines = item.tags?.length ? wrapCanvasText(ctx, item.tags.join(" · "), available) : [];
+  const unitLines = item.unit ? wrapCanvasText(ctx, `单位：${item.unit}${item.is_service ? " · 服务" : ""}`, available) : [];
   const photoHeight = photo ? 500 : 180;
   canvas.height = padding * 2 + companyHeight + photoHeight + 40 + nameLines.length * 48 +
-    44 + codeLines.length * 34 + 108 + (tagLines.length ? 32 + tagLines.length * 34 : 0);
+    44 + codeLines.length * 34 + 108 + unitLines.length * 34 + (tagLines.length ? 32 + tagLines.length * 34 : 0);
   if (canvas.height > 16000) {
     canvas.width = 0;
     canvas.height = 0;
@@ -79,6 +80,7 @@ export async function createProductCard(item, company) {
       minimumFractionDigits: 2, maximumFractionDigits: 2
     })}`], padding, 48, 64, 700, "#2563eb");
     y += 16;
+    if (unitLines.length) lines(unitLines, padding, 24, 34, 400, "#4b5563");
     if (tagLines.length) {
       lines(["TAGS / 标签"], padding, 16, 32, 600, "#6b7280");
       lines(tagLines, padding, 24, 34, 400, "#4b5563");

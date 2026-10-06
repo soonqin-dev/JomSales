@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import Catalog from "../Catalog";
 import { createClient } from "../../lib/supabase/client";
-import { readProducts, signedProducts, saveProduct, deleteProduct } from "../../lib/supabase/products";
+import { readProducts, readProductDetail, signedProducts, saveProduct, deleteProduct } from "../../lib/supabase/products";
 import useCloudQuotation from "../use-cloud-quotation";
 import { canManageProducts } from "../../lib/supabase/permissions";
 
@@ -21,6 +21,8 @@ export default function CloudCatalogPage() {
   const [verified, setVerified] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [query, setQuery] = useState(""), [page, setPage] = useState(0), [pageInfo, setPageInfo] = useState({ total: 0, has_more: false });
+  const queryRef = useRef(""), cursorRef = useRef(null), pageCursors = useRef([null]);
   const generation = useRef(0);
   const verification = useRef(0);
   const scope = useRef(null);
@@ -28,8 +30,8 @@ export default function CloudCatalogPage() {
   const working = useRef(false);
   rows.current = items;
 
-  async function load(requestedCompany = null) {
-    if (working.current) return;
+  async function load(requestedCompany = null, afterOperation = false) {
+    if (working.current && !afterOperation) return;
     const version = ++generation.current;
     setLoading(true); setError(""); setVerified(false);
     try {
@@ -45,22 +47,49 @@ export default function CloudCatalogPage() {
       if (result.error) throw result.error;
       const companyId = requestedCompany || scope.current?.companyId || new URLSearchParams(window.location.search).get("company") || result.data?.[0]?.company_id;
       const member = result.data?.find(m => m.company_id === companyId);
-      if (!result.data?.length) { window.location.replace("/account"); return; }
+      if (!result.data?.length) { scope.current = null; setContext(null); setItems([]); window.location.replace("/account"); return; }
       if (!member?.companies) {
         scope.current = null; setContext(null); setItems([]);
         throw new Error("你尚未加入公司，或公司权限已被停用。请到公司账号页确认。");
       }
-      const products = await readProducts(client, companyId);
+      const products = await readProducts(client, companyId, { query: queryRef.current, cursor: cursorRef.current });
       if (version !== generation.current) return;
       const next = { userId: auth.data.user.id, companyId, role: member.role, can_manage_products: member.can_manage_products === true, name: member.companies.name, memberships: result.data };
-      scope.current = next; setContext(next); setItems(products); setVerified(true);
+      scope.current = next; setContext(next); setItems(products.items); setPageInfo(products); setVerified(true);
     } catch (err) {
       if (version === generation.current) {
+        if (err.code === "42501" || /Company access denied/i.test(err.message)) { scope.current = null; setContext(null); setItems([]); }
         // Preserve in-memory unsaved quotations on transient network errors.
         // Confirmed sign-out or membership denial clears the workspace above.
         setError(`云端读取失败：${err.message}。请检查网络，以及是否已执行云端产品和最新产品权限 SQL。不会改用本地资料。`);
       }
     } finally { if (version === generation.current) setLoading(false); }
+  }
+
+  function search(value) {
+    if (working.current) return;
+    ++generation.current; queryRef.current = value; cursorRef.current = null; pageCursors.current = [null];
+    setQuery(value); setPage(0); setItems([]); setLoading(true);
+  }
+  useEffect(() => {
+    if (!scope.current || working.current) return;
+    const timer = setTimeout(() => void load(), 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  function navigate(nextPage) {
+    if (working.current || loading || nextPage < 0) return;
+    if (nextPage > page) pageCursors.current[nextPage] = pageInfo.cursor;
+    cursorRef.current = pageCursors.current[nextPage] || null;
+    setPage(nextPage); void load();
+  }
+
+  async function detail(item) {
+    const current = scope.current, version = generation.current;
+    if (!current || !verified) throw new Error("请先刷新确认公司权限。");
+    const result = await readProductDetail(createClient(), current.companyId, item.id);
+    if (version !== generation.current || scope.current?.companyId !== current.companyId) throw new Error("目录已改变，请重新选择产品。");
+    return result;
   }
 
   useEffect(() => {
@@ -150,6 +179,8 @@ export default function CloudCatalogPage() {
       if (version !== generation.current) return;
       setItems(prev => previous ? prev.map(p => p.id === signed.id ? signed : p) : [signed, ...prev]);
       setMessage(`已保存到云端。${result.warning}${imageWarning}`);
+      cursorRef.current = null; pageCursors.current = [null]; setPage(0);
+      await load(null, true);
     });
   }
 
@@ -159,6 +190,8 @@ export default function CloudCatalogPage() {
       if (version !== generation.current) return;
       setItems(prev => prev.filter(p => p.id !== item.id));
       setMessage(`产品已删除，其他设备刷新后可见。${warning}`);
+      cursorRef.current = null; pageCursors.current = [null]; setPage(0);
+      await load(null, true);
     });
   }
 
@@ -173,6 +206,7 @@ export default function CloudCatalogPage() {
         {context && <Link href={`/quotations?company=${context.companyId}`}>已保存报价</Link>}
         {context?.role === "admin" && <Link href={`/team?company=${context.companyId}`}>员工与邀请</Link>}
         {context?.role === "admin" && <Link href={`/brand?company=${context.companyId}`}>公司品牌</Link>}
+        {context?.role === "admin" && <Link href={`/catalog-settings?company=${context.companyId}`}>目录设置与导入</Link>}
       </div>
       {loading && <p role="status">正在读取云端产品…</p>}
       {!loading && !context && !error && <p><Link href="/account">请登录并接受公司邀请</Link></p>}
@@ -183,7 +217,9 @@ export default function CloudCatalogPage() {
       {message && <p role="status">{message}</p>}
     </div>
     {context && <CompanyWorkspace key={`${context.userId}:${context.companyId}`} context={context} cloud={{
-      items, name: context.name, canManage: verified && canManageProducts(context), canWrite: verified && !loading && canManageProducts(context) && !busy, save, remove
+      items, name: context.name, canManage: verified && canManageProducts(context), canWrite: verified && !loading && canManageProducts(context) && !busy, save, remove,
+      query, search, loading, busy, total: pageInfo.total, page, hasMore: pageInfo.has_more,
+      previous: () => navigate(page - 1), next: () => navigate(page + 1), detail
     }} />}
   </>;
 }

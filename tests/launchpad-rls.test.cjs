@@ -17,7 +17,8 @@ test("Launchpad accounts: real PostgreSQL permissions, protected primary, suspen
       create table storage.objects(id uuid primary key default gen_random_uuid(),bucket_id text references storage.buckets(id),name text,metadata jsonb default '{}');
       alter table storage.objects enable row level security;grant select,insert,update,delete on storage.objects to anon,authenticated;
       create function storage.foldername(name text) returns text[] language sql immutable as $$select (string_to_array(name,'/'))[1:array_length(string_to_array(name,'/'),1)-1]$$;`);
-    for (const file of readdirSync(join(__dirname,"../supabase/migrations")).filter(f=>f.endsWith(".sql")).sort()) {
+    // Batch 2 is tested independently with its pg_trgm extension and new fixtures.
+    for (const file of readdirSync(join(__dirname,"../supabase/migrations")).filter(f=>f.endsWith(".sql") && f < "202610060002").sort()) {
       if (file.startsWith("202610060001")) {
         await db.exec(`insert into auth.users(id,email,email_confirmed_at) values
           ('${platform}','platform@test.example',now()),('${owner}','owner@test.example',now()),('${deputy}','deputy@test.example',now()),

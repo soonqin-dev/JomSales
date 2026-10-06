@@ -13,7 +13,7 @@ const api = context.api;
 const COMPANY = "10000000-0000-4000-a000-000000000001";
 const base = { id: "10000000-0000-4000-a000-000000000002", serial: "P-1", name: "Product", tags: [], price: "10.00", image: "" };
 
-function client({ existing = [], writeError = false, noMatch = false, removeError = false, lostReply = false, photoError = false } = {}) {
+function client({ existing = [], writeError = false, noMatch = false, removeError = false, lostReply = false, photoError = false, numericPrices = false } = {}) {
   const rows = [...existing], uploads = [], removals = [], ranges = [], batches = [];
   const storage = {
     upload: async (path, blob, options) => { uploads.push({ path, blob, options }); return { error: null }; },
@@ -33,13 +33,21 @@ function client({ existing = [], writeError = false, noMatch = false, removeErro
           if (action === "select") return { data: rows.find(row => Object.entries(filters).every(([k, v]) => row[k] === v)) || null, error: null };
           if (noMatch) return { data: null, error: null };
           if (writeError && !lostReply) return { data: null, error: { message: "Network failure" } };
-          const row = { ...(action === "update" ? rows.find(r => r.id === filters.id) : {}), ...payload, revision: 2 };
+          const row = { deleted_at: null, ...(action === "update" ? rows.find(r => r.id === filters.id) : {}), ...payload, revision: 2 };
+          if (numericPrices) row.price = Number(row.price);
           rows.push(row);
           return lostReply ? { data: null, error: { message: "Response lost" } } : { data: row, error: null };
         }
       }; return q;
     },
     storage: { from: () => storage }
+  };
+  instance.rpc = async (name, args) => {
+    assert.equal(name, "search_company_products");
+    const offset = args.after_id ? Number(args.after_id) + 1 : 0;
+    ranges.push([offset,offset+49]);
+    const items = rows.slice(offset,offset+50);
+    return { data: { items, total: rows.length, has_more: offset+50 < rows.length, cursor: items.length ? { id: items.at(-1).id, created_at: "2026-10-06" } : null } };
   };
   return { instance, rows, uploads, removals, ranges, batches };
 }
@@ -72,12 +80,13 @@ test("failed/stale writes clean only newly uploaded images; broken existing imag
   assert.equal(saved.row.image_path, "old");
 });
 
-test("catalog paging and bounded short-lived signing do not truncate products", async () => {
+test("catalog reads only one page and signs only that page, with explicit next cursor", async () => {
   const fixture = Array.from({ length: 601 }, (_, i) => ({ ...base, id: String(i), image_path: `image-${i}` }));
   const mock = client({ existing: fixture });
   const data = await api.readProducts(mock.instance, COMPANY);
-  assert.equal(data.length, 601); assert.equal(mock.ranges.length, 2);
-  assert.equal(mock.batches.length, 7); assert(mock.batches.every(batch => batch.paths.length <= 100 && batch.expiry === 300));
+  assert.equal(data.items.length, 50); assert.equal(data.total, 601); assert.equal(mock.ranges.length, 1);
+  assert.equal(mock.batches.length, 1); assert(mock.batches.every(batch => batch.paths.length <= 50 && batch.expiry === 300));
+  assert.equal((await api.readProducts(mock.instance, COMPANY, { cursor: data.cursor })).items[0].id, "50");
   const missing = client({ photoError: true });
   const signed = await api.signedProducts(missing.instance, [{ ...base, image_path: "missing" }]);
   assert(signed[0].imageError); assert.equal(signed[0].image, "");
@@ -90,6 +99,15 @@ test("new cloud products have no legacy source; editing preserves existing impor
   const existing = client({ existing: [previous] });
   const saved = await api.saveProduct(existing.instance, COMPANY, { ...base, name: "Edited" }, previous);
   assert.equal(saved.row.source_key, "existing-cloud-source");
+});
+
+test("lost product reply recovers numeric SQL price and fresh insert retry never duplicates",async()=>{
+  const mock=client({lostReply:true,numericPrices:true});
+  const saved=await api.saveProduct(mock.instance,COMPANY,base);
+  assert.equal(saved.row.price,10);assert.match(saved.warning,/核对/);assert.equal(mock.rows.length,1);
+  const retry=await api.saveProduct(mock.instance,COMPANY,base);
+  assert.equal(retry.row.id,base.id);assert.equal(mock.rows.length,1);
+  await assert.rejects(api.saveProduct(mock.instance,COMPANY,{...base,name:"Changed after lost response"}),/不同的云端记录/);
 });
 
 test("delete is soft, clears the photo reference before cleanup, and checks stale revision", async () => {
