@@ -46,8 +46,8 @@ function client({ existing = [], writeError = false, noMatch = false, removeErro
     assert.equal(name, "search_company_products");
     const offset = args.after_id ? Number(args.after_id) + 1 : 0;
     ranges.push([offset,offset+49]);
-    const items = rows.slice(offset,offset+50);
-    return { data: { items, total: rows.length, has_more: offset+50 < rows.length, cursor: items.length ? { id: items.at(-1).id, created_at: "2026-10-06" } : null } };
+    const items = rows.slice(offset,offset+30);
+    return { data: { items, total: rows.length, has_more: offset+30 < rows.length, cursor: items.length ? { id: items.at(-1).id, created_at: "2026-10-06" } : null } };
   };
   return { instance, rows, uploads, removals, ranges, batches };
 }
@@ -84,9 +84,9 @@ test("catalog reads only one page and signs only that page, with explicit next c
   const fixture = Array.from({ length: 601 }, (_, i) => ({ ...base, id: String(i), image_path: `image-${i}` }));
   const mock = client({ existing: fixture });
   const data = await api.readProducts(mock.instance, COMPANY);
-  assert.equal(data.items.length, 50); assert.equal(data.total, 601); assert.equal(mock.ranges.length, 1);
-  assert.equal(mock.batches.length, 1); assert(mock.batches.every(batch => batch.paths.length <= 50 && batch.expiry === 300));
-  assert.equal((await api.readProducts(mock.instance, COMPANY, { cursor: data.cursor })).items[0].id, "50");
+  assert.equal(data.items.length, 30); assert.equal(data.total, 601); assert.equal(mock.ranges.length, 1);
+  assert.equal(mock.batches.length, 1); assert(mock.batches.every(batch => batch.paths.length <= 30 && batch.expiry === 300));
+  assert.equal((await api.readProducts(mock.instance, COMPANY, { cursor: data.cursor })).items[0].id, "30");
   const missing = client({ photoError: true });
   const signed = await api.signedProducts(missing.instance, [{ ...base, image_path: "missing" }]);
   assert(signed[0].imageError); assert.equal(signed[0].image, "");

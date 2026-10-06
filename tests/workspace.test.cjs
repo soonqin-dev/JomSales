@@ -6,7 +6,7 @@ const { join } = require("node:path");
 const crypto = require("node:crypto").webcrypto;
 const source = file => readFileSync(join(__dirname,"..",file),"utf8").replace(/^import .*;\r?\n/gm,"").replace(/export /g,"");
 const context = vm.createContext({ crypto, TextEncoder, fetch, Blob, Set });
-vm.runInContext(source("app/quotation-utils.js")+"\n"+source("lib/supabase/workspace.js")+"\nglobalThis.api={quotePayload,saveQuotation,readQuotation,listQuotations,manageQuotation,saveBrand,signedBrand,newDraft};", context);
+vm.runInContext(source("app/quotation-utils.js")+source('lib/quotation-filters.js')+"\n"+source("lib/supabase/workspace.js")+"\nglobalThis.api={quotePayload,saveQuotation,readQuotation,listQuotations,manageQuotation,saveBrand,signedBrand,newDraft};", context);
 const api = context.api;
 const scope = {companyId:"40000000-0000-4000-a000-000000000010",userId:"40000000-0000-4000-a000-000000000001"};
 const brand={id:scope.companyId,name:"Company A",contact:"Phone",logo_path:null,logo:"",brand_revision:1};

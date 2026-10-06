@@ -12,7 +12,7 @@ function createCatalogFixture(port){
   const live=token=>links.find(l=>l.token===token&&!l.revoked_at&&Date.parse(l.expires_at)>Date.now()&&member(l.company_id,l.created_by)&&profiles.get(l.created_by)?.whatsapp===l.whatsapp);
   const visible=(l,p)=>p.company_id===l.company_id&&p.catalog_public&&!p.deleted_at&&(l.scope==="all"||l.product_ids.includes(p.id));
   const page=(rows,cursor)=>rows.filter(p=>!cursor||p.created_at<cursor.created_at||(p.created_at===cursor.created_at&&p.id>cursor.id)).sort((a,b)=>b.created_at.localeCompare(a.created_at)||a.id.localeCompare(b.id));
-  const shaped=(rows)=>({items:rows.slice(0,50),has_more:rows.length>50,cursor:rows.length?{id:rows[Math.min(49,rows.length-1)].id,created_at:rows[Math.min(49,rows.length-1)].created_at}:null});
+  const shaped=(rows)=>({items:rows.slice(0,30),has_more:rows.length>30,cursor:rows.length?{id:rows[Math.min(29,rows.length-1)].id,created_at:rows[Math.min(29,rows.length-1)].created_at}:null});
   f.server.removeListener("request",original);
   f.server.on("request",async(req,res)=>{
     const url=new URL(req.url,f.origin),path=url.pathname,newRpc=["search_catalog_share_products","set_product_catalog_visibility","set_catalog_visibility_batch","create_catalog_link","revoke_catalog_link","read_public_catalog","public_catalog_image","public_catalog_inquiry"].includes(path.split("/").at(-1));

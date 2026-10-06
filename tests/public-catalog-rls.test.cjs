@@ -67,7 +67,7 @@ test("public catalog batch 4: PostgreSQL price-free capability links, private St
       await db.exec(`insert into public.products(id,company_id,serial,name,price,catalog_public,created_at) select ('d0000000-0000-4000-a000-'||lpad((1000+n)::text,12,'0'))::uuid,'${co}','B-'||n,'Part '||n,777,true,'2026-01-01' from generate_series(1,120)n;`);
       const seen=new Set();let cursor=null,more=true;while(more){const p=await page(tok(100),"",cursor);assert.equal(p.total,121);assert(p.items.length<=50);for(const item of p.items){assert(!seen.has(item.id));seen.add(item.id);}cursor=p.cursor;more=p.has_more;}
       assert.equal(seen.size,121);assert.equal((await page(tok(101))).total,1);
-      const internal=(await as(peer,`select public.search_catalog_share_products('${co}','B-') value`))[0].value;assert.equal(internal.items.length,50);assert.equal(internal.has_more,true);
+      const internal=(await as(peer,`select public.search_catalog_share_products('${co}','B-') value`))[0].value;assert.equal(internal.items.length,30);assert.equal(internal.has_more,true);
       const p=await visibility(owner,part,2,false);assert.equal((await page(tok(101))).total,0);await assert.rejects(as(null,`select public.public_catalog_inquiry('${tok(101)}','${part}')`),/unavailable/);await visibility(owner,part,p.revision,true);
     });
     await t.test("bulk publication is admin-only, count-guarded, literal and never changes prices",async()=>{

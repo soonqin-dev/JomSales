@@ -392,7 +392,7 @@ export default function Catalog({ cloud, quotation }) {
         )}
       </section>
       <div className="cloudButtons"><button disabled={!cloud.page || cloud.loading || saving || cloud.busy} onClick={cloud.previous}>上一页</button>
-        <span>第 {(cloud.page || 0) + 1} 页 · 每页最多 50 项</span><button disabled={!cloud.hasMore || cloud.loading || saving || cloud.busy} onClick={cloud.next}>下一页</button></div>
+        <span>第 {(cloud.page || 0) + 1} 页 · 每页最多 30 项</span><button disabled={!cloud.hasMore || cloud.loading || saving || cloud.busy} onClick={cloud.next}>下一页</button></div>
 
       {selectedProduct && (
         <dialog

@@ -24,10 +24,10 @@ const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));let server,browser,d
     }
     async function ready(page){await page.waitForFunction(()=>!document.body.innerText.includes("正在搜索公司目录…")&&!document.body.innerText.includes("正在读取云端产品…"));}
     const owner=await open("owner"),page=owner.page;diagnostic=page;await ready(page);
-    assert.equal(await page.locator("article.card").count(),50);
+    assert.equal(await page.locator("article.card").count(),30);
     await button(page,"查看 Cloud Widget 详情").click();await button(page,"＋ 加入报价清单").click();await button(page,"关闭产品详情").click();
     assert.match(await page.locator(".quotationCartButton").innerText(),/1 项/);
-    await button(page,"下一页").click();await ready(page);await page.getByText("第 2 页 · 每页最多 50 项",{exact:true}).waitFor();assert.equal(await page.locator("article.card").count(),50);
+    await button(page,"下一页").click();await ready(page);await page.getByText("第 2 页 · 每页最多 30 项",{exact:true}).waitFor();assert.equal(await page.locator("article.card").count(),30);
     assert.match(await page.locator(".quotationCartButton").innerText(),/1 项/,"paging must retain unsaved quotation");
     await button(page,"＋ 新建报价单").click();assert.match(await page.locator(".quotationCartButton").innerText(),/0 项/);
     await page.getByLabel("搜索产品",{exact:true}).fill("Deep search target");await button(page,"查看 Deep search target 详情").waitFor();assert.equal(await page.locator("article.card").count(),1);

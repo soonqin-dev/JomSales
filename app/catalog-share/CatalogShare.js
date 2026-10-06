@@ -58,7 +58,7 @@ function ShareWorkspace({context}) {
         {context.role==="admin"&&<button disabled={busy||loading} onClick={()=>void visibility(p)}>{p.catalog_public?"停止公开":"允许公开"} · {p.serial}</button>}
         {scope==="selected"&&<label><input type="checkbox" checked={!!picked[p.id]} disabled={busy||!p.catalog_public} onChange={e=>pick(p,e.target.checked)}/>选择 {p.serial}</label>}
       </article>)}
-      <div className="cloudButtons"><button disabled={busy||loading||!productPage} onClick={()=>goProduct(productPage-1)}>上一页产品</button><span>第 {productPage+1} 页 · 每页最多 50 项</span><button disabled={busy||loading||!products.has_more} onClick={()=>goProduct(productPage+1)}>下一页产品</button></div>
+      <div className="cloudButtons"><button disabled={busy||loading||!productPage} onClick={()=>goProduct(productPage-1)}>上一页产品</button><span>第 {productPage+1} 页 · 每页最多 30 项</span><button disabled={busy||loading||!products.has_more} onClick={()=>goProduct(productPage+1)}>下一页产品</button></div>
     </details>
     {scope==="selected"&&count>0&&<details><summary>检查已选产品（{count}）</summary>{Object.entries(picked).map(([id,p])=><p key={id}>{p.serial} · {p.name} <button disabled={busy} onClick={()=>pick({id},false)}>移除 {p.serial}</button></p>)}<button disabled={busy} onClick={()=>{if(window.confirm("清空已选产品？"))setPicked({});}}>清空选择</button></details>}
     <h2>已生成的链接</h2><button disabled={busy} onClick={()=>void readLinks()}>刷新链接</button>

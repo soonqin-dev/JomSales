@@ -45,7 +45,7 @@ export default function PublicCatalog({ token }) {
         <button onClick={()=>setSelected(selected?.id===p.id?null:p)}>{selected?.id===p.id?"收起详情":"查看详情"} · {p.serial}</button> {inquiry(p)}
         {selected?.id===p.id&&<div>{p.description&&<p className="preserveLines">{p.description}</p>}{p.has_image&&<img className="preview" src={`${api}/image/${p.id}?full=1`} alt={`${p.name} 详情照片`} onError={e=>imageFailed(e,p.id)}/>}</div>}
       </article>)}
-      <div className="cloudButtons"><button disabled={busy||page===0} onClick={()=>navigate(page-1)}>上一页</button><span>第 {page+1} 页 · 每页最多 50 项</span><button disabled={busy||!data.has_more} onClick={()=>navigate(page+1)}>下一页</button></div>
+      <div className="cloudButtons"><button disabled={busy||page===0} onClick={()=>navigate(page-1)}>上一页</button><span>第 {page+1} 页 · 每页最多 30 项</span><button disabled={busy||!data.has_more} onClick={()=>navigate(page+1)}>下一页</button></div>
     </>}
     <p>JomSales</p>
   </main>;
