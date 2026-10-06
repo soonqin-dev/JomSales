@@ -25,7 +25,7 @@ const fixture=createServer(async(req,res)=>{
       const found=Object.values(users).find(u=>u.email===body.email);
       if(found&&body.password==="fixture-password")data=session(found);else{status=400;data={msg:"Invalid credentials"};}
     }else if(path==="/auth/v1/signup"){
-      assert.equal(body.data.display_name,"新员工");data={...users.waiting,user_metadata:body.data};
+      assert.equal(body.data.display_name,"新员工");assert.equal(body.password,'Ab!123');data={...users.waiting,user_metadata:body.data};
     }else if(path==="/auth/v1/recover"){recoverCalls++;assert.equal(url.searchParams.get("redirect_to"),base+"/auth/reset");}
     else if(path==="/auth/v1/logout")data={};
     else if(path==="/auth/v1/user"){
@@ -121,7 +121,7 @@ const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
     const anonymous=await browser.newContext({viewport:{width:390,height:844}}),anon=await anonymous.newPage();
     await anon.goto(base+"/account");await anon.getByLabel("邮箱",{exact:true}).fill("waiting@fixture.example");await anon.getByRole("button",{name:"忘记密码",exact:true}).click();await anon.getByRole("status").filter({hasText:"重置邮件"}).waitFor();assert.equal(recoverCalls,1);
     await anon.goto(base+"/auth/reset?error=expired");await anon.getByRole("alert").filter({hasText:"链接失效"}).waitFor();assert.equal(await anon.getByRole("button",{name:"设置密码并退出登录",exact:true}).count(),0);
-    await anon.goto(base+"/account");await anon.getByRole("button",{name:"注册员工账号",exact:true}).click();await anon.getByLabel("显示姓名",{exact:true}).fill("新员工");await anon.getByLabel("邮箱",{exact:true}).fill("new@fixture.example");await anon.getByLabel("密码（至少 12 个字符）",{exact:true}).fill("fixture-password");await anon.getByRole("button",{name:"注册并验证邮箱",exact:true}).click();await anon.getByRole("status").filter({hasText:"注册申请已提交"}).waitFor();
+    await anon.goto(base+"/account");await anon.getByRole("button",{name:"注册员工账号",exact:true}).click();await anon.getByLabel("显示姓名",{exact:true}).fill("新员工");await anon.getByLabel("邮箱",{exact:true}).fill("new@fixture.example");const signupPassword=anon.getByLabel("密码（至少 6 个字符）",{exact:true});await signupPassword.fill('short');assert.equal(await signupPassword.evaluate(input=>input.validity.tooShort),true);await signupPassword.fill('Ab!123');await anon.getByRole("button",{name:"注册并验证邮箱",exact:true}).click();await anon.getByRole("status").filter({hasText:"注册申请已提交"}).waitFor();
     console.log("PASS primary invite label, password recovery, expired-link rejection and signup name");
     assert.deepEqual(errors,[]);console.log("PASS no browser runtime or unexpected API errors");
   }finally{await browser?.close();server?.kill();await new Promise(resolve=>fixture.close(resolve));}

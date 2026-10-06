@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
 import { pendingInvite } from "../../lib/supabase/invitations";
 import { canManageProducts } from "../../lib/supabase/permissions";
-import { memberLabel, profileFields, validatePassword } from "../../lib/account-utils";
+import { memberLabel, profileFields, validatePassword,PASSWORD_MIN_LENGTH,PASSWORD_MAX_LENGTH } from "../../lib/account-utils";
 
 export default function AccountPage() {
   const [user, setUser] = useState(null);
@@ -139,8 +139,8 @@ export default function AccountPage() {
         {mode === "register" && <><label htmlFor="account-name">显示姓名</label><input id="account-name" autoComplete="name" required maxLength={120} value={displayName} disabled={busy} onChange={e => setDisplayName(e.target.value)} /></>}
         <label htmlFor="account-email">邮箱</label>
         <input id="account-email" type="email" autoComplete="email" required maxLength={254} value={email} disabled={busy} onChange={e => setEmail(e.target.value)} />
-        <label htmlFor="account-password">密码{mode === "register" && "（至少 12 个字符）"}</label>
-        <input id="account-password" type="password" autoComplete={mode === "register" ? "new-password" : "current-password"} required minLength={mode === "register" ? 12 : 1} maxLength={128} value={password} disabled={busy} onChange={e => setPassword(e.target.value)} />
+        <label htmlFor="account-password">密码{mode === "register" && `（至少 ${PASSWORD_MIN_LENGTH} 个字符）`}</label>
+        <input id="account-password" type="password" autoComplete={mode === "register" ? "new-password" : "current-password"} required minLength={mode === "register" ? PASSWORD_MIN_LENGTH : 1} maxLength={PASSWORD_MAX_LENGTH} value={password} disabled={busy} onChange={e => setPassword(e.target.value)} />
         <button type="submit" disabled={busy}>{busy ? "处理中…" : mode === "register" ? "注册并验证邮箱" : "登录"}</button>
       </form>
       <button disabled={busy || !email.trim()} onClick={() => void perform(async client => {

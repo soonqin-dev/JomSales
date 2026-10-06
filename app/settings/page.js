@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
-import { profileFields, validatePassword,companyReturn,completeCompanyProfile } from "../../lib/account-utils";
+import { profileFields, validatePassword,companyReturn,completeCompanyProfile,PASSWORD_MIN_LENGTH,PASSWORD_MAX_LENGTH } from "../../lib/account-utils";
 
 export default function Settings() {
   const [user, setUser] = useState(null), [profile, setProfile] = useState(null);
@@ -104,7 +104,7 @@ export default function Settings() {
           if (signout.error) setMessage("密码已修改，但退出全部设备未确认；请重新登录并检查其他设备。");
           else {intentionalExit.current=true;window.location.replace("/account");}
         }); }}>
-          <label htmlFor="new-password">新密码（12–128 个字符）</label><input id="new-password" type="password" required minLength={12} maxLength={128} autoComplete="new-password" value={password} disabled={busy} onChange={e => setPassword(e.target.value)} />
+          <label htmlFor="new-password">新密码（{PASSWORD_MIN_LENGTH}–{PASSWORD_MAX_LENGTH} 个字符）</label><input id="new-password" type="password" required minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} autoComplete="new-password" value={password} disabled={busy} onChange={e => setPassword(e.target.value)} />
           <label htmlFor="confirm-password">确认新密码</label><input id="confirm-password" type="password" required autoComplete="new-password" value={confirm} disabled={busy} onChange={e => setConfirm(e.target.value)} />
           <button disabled={busy}>修改密码并退出登录</button>
         </form>

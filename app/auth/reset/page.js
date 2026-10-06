@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "../../../lib/supabase/client";
-import { validatePassword } from "../../../lib/account-utils";
+import { validatePassword,PASSWORD_MIN_LENGTH,PASSWORD_MAX_LENGTH } from "../../../lib/account-utils";
 
 export default function ResetPassword() {
   const [ready, setReady] = useState(false), [busy, setBusy] = useState(false), [error, setError] = useState("");
@@ -48,7 +48,7 @@ export default function ResetPassword() {
         window.location.replace("/account");
       } catch (err) { setError(err.message); }
       finally { working.current = false; setBusy(false); }
-    }}><label htmlFor="reset-password">新密码（12–128 个字符）</label><input id="reset-password" type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={password} disabled={busy} onChange={e => setPassword(e.target.value)} />
+    }}><label htmlFor="reset-password">新密码（{PASSWORD_MIN_LENGTH}–{PASSWORD_MAX_LENGTH} 个字符）</label><input id="reset-password" type="password" autoComplete="new-password" required minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} value={password} disabled={busy} onChange={e => setPassword(e.target.value)} />
       <label htmlFor="reset-confirm">确认新密码</label><input id="reset-confirm" type="password" autoComplete="new-password" required value={confirm} disabled={busy} onChange={e => setConfirm(e.target.value)} />
       {factor && <><label htmlFor="reset-mfa">验证器验证码</label><input id="reset-mfa" inputMode="numeric" autoComplete="one-time-code" required pattern="[0-9]{6}" maxLength={6} value={code} disabled={busy} onChange={e => setCode(e.target.value)} /></>}
       <button disabled={busy}>设置密码并退出登录</button>

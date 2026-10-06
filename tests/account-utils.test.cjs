@@ -14,6 +14,7 @@ test("profile name and international phone validation",()=>{
 });
 test("password confirmation and nullable plan limits",()=>{
   assert.equal(api.validatePassword("secure-password","secure-password"),"secure-password");
+  assert.equal(api.validatePassword('Ab!123','Ab!123'),'Ab!123');assert.equal(api.validatePassword('x'.repeat(128),'x'.repeat(128)).length,128);assert.throws(()=>api.validatePassword('x'.repeat(129),'x'.repeat(129)));
   assert.throws(()=>api.validatePassword("short","short"));assert.throws(()=>api.validatePassword("secure-password","different-password"));
   assert.equal(api.nullableLimit(""),null);assert.equal(api.nullableLimit("5"),5);
   for(const value of ["1.5","0","-1","NaN"])assert.throws(()=>api.nullableLimit(value));
