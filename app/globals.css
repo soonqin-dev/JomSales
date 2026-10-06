@@ -925,3 +925,6 @@ form small {
 .categoryFilter select { width: 100%; max-width: 100%; min-width: 0; min-height: 44px; padding: 10px; font: inherit; background: white; border: 1px solid #d1d5db; border-radius: 6px; }
 .quotationHistoryFilters > div { min-width: 0; }
 .quotationHistoryFilters button { max-width: 100%; min-height: 40px; overflow-wrap: anywhere; white-space: normal; }
+.priceEditorRow { padding: 12px 0; border-bottom: 1px solid #e5e7eb; overflow-wrap: anywhere; }
+.priceEditorRow label { display: grid; gap: 6px; margin: 8px 0; }
+.priceEditorRow input { width: 100%; min-width: 0; }

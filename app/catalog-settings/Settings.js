@@ -7,6 +7,7 @@ import { parseCsv, guessMapping, previewCsv, CSV_FIELDS, csvTemplate } from "../
 import { downloadFile } from "../share";
 import PriceUpdate from "./PriceUpdate";
 import Categories from "./Categories";
+import PriceEditor from './PriceEditor';
 
 function csvCell(value) {
   let text = String(value ?? "");
@@ -20,6 +21,7 @@ function Editor({ context }) {
   const [preview, setPreview] = useState(null), [results, setResults] = useState({}), [progress, setProgress] = useState(0);
   const [priceBusy,setPriceBusy]=useState(false);
   const [categoryBusy,setCategoryBusy]=useState(false);
+  const [tableBusy,setTableBusy]=useState(false);
   const working = useRef(false), sequence = useRef(0), importId = useRef(null), started = useRef(false), stop = useRef(false), resultRef = useRef({});
   async function rpc(name, args) { const result = await createClient().rpc(name, args); if (result.error) throw result.error; return result.data; }
   async function run(task) {
@@ -107,7 +109,7 @@ function Editor({ context }) {
   return <>
     <Link href={`/cloud?company=${context.companyId}`}>← 产品目录</Link><h1>目录设置与导入</h1><p>{context.name}</p>
     {error && <p role="alert" className="accountError">{error}</p>}{message && <p role="status">{message}</p>}
-    <fieldset className="productFields" disabled={priceBusy||categoryBusy}>
+    <fieldset className="productFields" disabled={priceBusy||categoryBusy||tableBusy}>
     <details className="accountCard"><summary>产品编号设置</summary>
       {!settings && <button disabled={busy} onClick={readNumbers}>读取编号设置</button>}
       {numberDraft && <form onSubmit={e => { e.preventDefault(); void run(async () => {
@@ -142,8 +144,9 @@ function Editor({ context }) {
       </>}
     </section>
     </fieldset>
-    <PriceUpdate context={context} blocked={busy||categoryBusy} onBusyChange={setPriceBusy}/>
-    <Categories context={context} blocked={busy||priceBusy} onBusyChange={setCategoryBusy}/>
+    <PriceEditor context={context} blocked={busy||priceBusy||categoryBusy} onBusyChange={setTableBusy}/>
+    <PriceUpdate context={context} blocked={busy||categoryBusy||tableBusy} onBusyChange={setPriceBusy}/>
+    <Categories context={context} blocked={busy||priceBusy||tableBusy} onBusyChange={setCategoryBusy}/>
   </>;
 }
 export default function CatalogSettings() {

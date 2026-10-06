@@ -2,16 +2,16 @@
 import { useEffect,useRef,useState } from "react";
 import { createClient } from "../../lib/supabase/client";
 import { parseCsv } from "../../lib/product-csv";
-import { previewPriceCsv,guessPriceMapping,matchPricePreview,priceUpdateEntry,priceReportCsv,PRICE_FIELDS,PRICE_STATUS } from "../../lib/product-price-csv";
+import { previewPriceCsv,guessPriceMapping,matchPricePreview,priceReportCsv,PRICE_FIELDS,PRICE_STATUS } from "../../lib/product-price-csv";
+import {readPriceSnapshots,applyPriceBatches,PRICE_APPLY_TERMINAL} from '../../lib/supabase/price-changes';
 import { downloadFile } from "../share";
 import { formatMoney,moneyToCents } from "../quotation-utils";
 
-const terminal=new Set(["updated","unchanged","conflict","unavailable","failed"]);
+const terminal=PRICE_APPLY_TERMINAL;
 export default function PriceUpdate({context,blocked=false,onBusyChange}) {
   const [text,setText]=useState(""),[filename,setFilename]=useState(""),[delimiter,setDelimiter]=useState(","),[parsed,setParsed]=useState(null),[mapping,setMapping]=useState({});
   const [preview,setPreview]=useState(null),[results,setResults]=useState({}),[busy,setBusy]=useState(false),[applying,setApplying]=useState(false),[begun,setBegun]=useState(false),[error,setError]=useState(""),[message,setMessage]=useState("");
   const working=useRef(false),stop=useRef(false),alive=useRef(true),job=useRef(null),started=useRef(false),resultRef=useRef({});
-  async function rpc(name,args){const result=await createClient().rpc(name,args);if(result.error)throw result.error;return result.data;}
   async function run(task){if(working.current||blocked)return;working.current=true;setBusy(true);onBusyChange?.(true);setError("");setMessage("");try{await task();}catch(err){if(alive.current)setError(err.message||"操作未确认，请保留本页并重试；当前预览仍保留。");}finally{working.current=false;if(alive.current){setBusy(false);onBusyChange?.(false);}}}
   useEffect(()=>{alive.current=true;return()=>{alive.current=false;stop.current=true;};},[]);
   useEffect(()=>{const leave=e=>{if(busy||started.current){e.preventDefault();e.returnValue="";}};const link=e=>{
@@ -27,8 +27,7 @@ export default function PriceUpdate({context,blocked=false,onBusyChange}) {
     setText(content);setFilename(file.name);setParsed(null);parse(content,delimiter);
   });}
   async function inspect(){await run(async()=>{
-    setPreview(null);job.current=null;const rows=previewPriceCsv(parsed,mapping),codes=rows.filter(r=>!r.error).map(r=>r.serial),products=[];
-    for(let offset=0;offset<codes.length&&!stop.current;offset+=500){const found=await rpc("preview_product_prices",{target_company:context.companyId,codes:codes.slice(offset,offset+500)});if(!Array.isArray(found))throw new Error("预览结果无效，请重试。");products.push(...found);}
+    setPreview(null);job.current=null;const rows=previewPriceCsv(parsed,mapping),codes=rows.filter(r=>!r.error).map(r=>r.serial),products=await readPriceSnapshots(createClient(),context.companyId,codes,{stopped:()=>stop.current});
     if(!alive.current)return;setPreview(matchPricePreview(rows,products));job.current=crypto.randomUUID();setMessage("预览完成，尚未修改价格。仅按编号匹配本公司产品；名称、照片、单位等其他字段不会改动。");
   });}
   async function apply(){if(working.current||blocked||!preview||!job.current)return;
@@ -36,10 +35,7 @@ export default function PriceUpdate({context,blocked=false,onBusyChange}) {
     if(!pending.length||!window.confirm(`确认尝试修改 ${pending.length} 项产品价格？只修改价格，不改名称、照片或已保存报价；预览后被修改的产品会跳过。`))return;
     started.current=true;setBegun(true);stop.current=false;setApplying(true);
     await run(async()=>{try{
-      for(let offset=0;offset<pending.length&&!stop.current;offset+=100){const batch=pending.slice(offset,offset+100),outcomes=await rpc("apply_product_prices",{target_company:context.companyId,request_job:job.current,entries:batch.map(priceUpdateEntry)});
-        const wanted=new Set(batch.map(r=>r.row_number));if(!Array.isArray(outcomes)||outcomes.length!==batch.length||new Set(outcomes.map(r=>r.row_number)).size!==batch.length||outcomes.some(r=>!wanted.has(r.row_number)||!terminal.has(r.status)))throw new Error("结果未确认，请保留本页并重试；不会重复修改已确认行。");
-        for(const row of outcomes)resultRef.current[row.row_number]=row;if(alive.current)setResults({...resultRef.current});
-      }
+      await applyPriceBatches(createClient(),context.companyId,job.current,pending,{results:resultRef.current,stopped:()=>stop.current,onProgress:rows=>{if(alive.current)setResults(rows);}});
       if(alive.current)setMessage(stop.current?"调价已暂停。已修改的价格保留，可继续处理。":"本次调价处理完成。冲突／无效行需重新预览；已修改的价格和操作记录保留。");
     }finally{if(alive.current)setApplying(false);}});
   }
