@@ -48,13 +48,19 @@ export function formatMoney(cents) {
   })}`;
 }
 
-export function newQuotationDetails() {
+export function newQuotationDetails(defaults = {}) {
   const now = new Date();
   const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"),
     String(now.getDate()).padStart(2, "0")].join("-");
-  const time = [now.getHours(), now.getMinutes(), now.getSeconds()]
-    .map(value => String(value).padStart(2, "0")).join("");
-  const suffix = crypto.randomUUID().slice(0, 4).toUpperCase();
-  return { customerName: "", phone: "", number: `Q-${date.replaceAll("-", "")}-${time}-${suffix}`,
-    date, notes: "", discount: "0" };
+  return { customerName: "", phone: "", customerCompany: "", email: "", address: "", customerId: null, number: "",
+    date, notes: defaults.notes || "", discount: "0", validityDays: String(defaults.validity_days ?? 14), paymentTerms: defaults.payment_terms || "" };
+}
+
+export function formatAmount(value) {
+  const match = /^(\d+)(?:\.(\d{1,2}))?$/.exec(String(value));
+  return match ? `RM ${BigInt(match[1]).toLocaleString("en-MY")}.${(match[2] || "").padEnd(2,"0")}` : "—";
+}
+
+export function quoteStatus(status) {
+  return { pending: "Pending · 待客户确认", success: "Success · 已成交（未确认全额收款）", paid: "Paid · 人工确认全额收款" }[status] || "未知状态";
 }

@@ -145,6 +145,17 @@ export async function createQuotationPdf({ items, details, company }) {
     y += 18;
   }
   y += 20;
+  for (const value of [details.customerCompany, details.email, details.address]) {
+    if (!value) continue;
+    font(12);
+    for (const line of wrapped(value, right-left)) { if (y+20>bottom) nextPage(); text(line,left,y,{color:"#6b7280"});y+=18; }
+  }
+  if (details.validityDays) {
+    const expires = new Date(`${details.date}T00:00:00Z`);
+    expires.setUTCDate(expires.getUTCDate()+Number(details.validityDays));
+    if(y+20>bottom)nextPage();
+    text(`Valid until: ${expires.toISOString().slice(0,10)} (${details.validityDays} days)`,left,y,{size:11,color:"#6b7280"});y+=22;
+  }
   if (y + 78 > bottom) nextPage();
   tableHeader();
 
@@ -206,21 +217,23 @@ export async function createQuotationPdf({ items, details, company }) {
   fitted(formatMoney(totals.total), right - 8, y + 27, 178, 17);
   y += 72;
 
-  if (details.notes.trim()) {
+  for (const [label,value] of [["PAYMENT TERMS",details.paymentTerms || ""],["NOTES",details.notes]]) {
+    if (!value.trim()) continue;
     if (y + 44 > bottom) nextPage();
-    text("NOTES", left, y, { size: 11, weight: 700, color: "#2563eb" });
+    text(label, left, y, { size: 11, weight: 700, color: "#2563eb" });
     y += 22;
     font(12);
-    const notes = wrapped(details.notes, right - left);
+    const notes = wrapped(value, right - left);
     for (const line of notes) {
       if (y + 18 > bottom) {
         nextPage();
-        text("NOTES (continued)", left, y, { size: 11, weight: 700, color: "#2563eb" });
+        text(`${label} (continued)`, left, y, { size: 11, weight: 700, color: "#2563eb" });
         y += 22;
       }
       text(line, left, y);
       y += 18;
     }
+    y+=18;
   }
   finishPage();
 

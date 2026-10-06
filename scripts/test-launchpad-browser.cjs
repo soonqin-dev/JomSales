@@ -42,6 +42,8 @@ const fixture=createServer(async(req,res)=>{
       if(method.startsWith("platform_")&&user?.id!==users.platform.id){status=403;data={message:"Platform administrator access required."};}
       else if(method==="is_platform_admin")data=user?.id===users.platform.id;
       else if(method==="search_company_products")data={items:[],total:0,has_more:false,cursor:null};
+      else if(method==="get_quotation_defaults")data={prefix:"Q",digits:5,validity_days:14,payment_terms:"",notes:"",revision:1};
+      else if(method==="company_sales_report")data={rows:[],legacy_undated:0};
       else if(method==="save_account_profile"){
         if(failProfile){failProfile=false;status=409;data={message:"Profile changed. Reload before saving."};}
         else{assert.equal(body.expected_revision,profiles[user.id].revision);profiles[user.id]={...profiles[user.id],display_name:body.profile_name,whatsapp:body.work_whatsapp,revision:profiles[user.id].revision+1};data=profiles[user.id];}

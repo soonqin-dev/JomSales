@@ -21,7 +21,13 @@ function mock({ lost=false,conflict=false,signError=false,brandError=false }={})
       return {data:op!=="select"&&(lost||conflict)?null:row||null,error:op!=="select"&&lost?{message:"lost reply"}:null};}
   };return q;},storage:{from:()=>({createSignedUrl:async()=>signError?{error:{message:"denied"}}:{data:{signedUrl:"https://signed.test/logo"}},
     upload:async(path,blob,options)=>{uploads.push({path,blob,options});return {};},remove:async(paths)=>{removed.push(...paths);return {data:paths};}})},
-    rpc:async(_name,params)=>brandError?{error:{message:"revision conflict"}}:{data:{...brand,name:params.company_name,contact:params.company_contact,logo_path:params.new_logo_path,brand_revision:2}}};
+    rpc:async(name,params)=>{
+      if(name==="create_quotation"){
+        const row={...params.payload,id:params.target_quote,number:"Q-2026-00001",created_by:scope.userId,company_id:scope.companyId,company_snapshot:brand,revision:1};
+        rows.push(row);return lost?{error:{message:"lost reply"}}:{data:row};
+      }
+      return brandError?{error:{message:"revision conflict"}}:{data:{...brand,name:params.company_name,contact:params.company_contact,logo_path:params.new_logo_path,brand_revision:2}};
+    }};
   return {client,rows,ranges,removed,uploads};
 }
 test("quotation fields strip computed/extraneous data and reject invalid snapshots/totals",()=>{

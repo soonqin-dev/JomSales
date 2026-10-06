@@ -5,6 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
 import { newInviteToken, teamError } from "../../lib/supabase/invitations";
 import { memberLabel } from "../../lib/account-utils";
+import SalesReport from "./SalesReport";
 
 function inviteStatus(invite) {
   if (invite.accepted_at) return "已接受";
@@ -158,6 +159,7 @@ export default function TeamPage() {
         </div>}
       </section>
       {!loading && <>
+        <SalesReport key={context.companyId} companyId={context.companyId}/>
         <section className="accountCard"><h2>公司成员（{members.length}）</h2>
           {members.map(member => <div className="teamRow" key={member.user_id}>
             <div><strong>{member.display_name || member.email || "姓名待补填"}</strong><p>{member.email}</p><p>{memberLabel(member)} · {member.removed_at ? "已移除" : member.active ? "可访问" : "已停用"}{member.user_id === context.userId && " · 你"}</p>

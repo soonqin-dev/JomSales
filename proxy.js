@@ -30,4 +30,4 @@ export async function proxy(request) {
   return response;
 }
 
-export const config = { matcher: ["/", "/account", "/join", "/auth/callback", "/auth/reset", "/settings", "/platform", "/catalog-settings", "/cloud", "/team", "/brand", "/quotations", "/migration"] };
+export const config = { matcher: ["/", "/account", "/join", "/auth/callback", "/auth/reset", "/settings", "/platform", "/catalog-settings", "/customers", "/cloud", "/team", "/brand", "/quotations", "/migration"] };

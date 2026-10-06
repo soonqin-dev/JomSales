@@ -263,6 +263,7 @@ export default function Catalog({ cloud, quotation }) {
       <div className="notice">
         公司工作区：{cloud.name}。产品、报价、客户资料和公司品牌均保存在公司云端。
         <p className="activeQuotation">{quotation.row?.revision ? `正在编辑：${quotation.details.number}` : "新报价"}</p>
+        {quotation.copiedFrom&&<p>复制自 {quotation.copiedFrom}，请确认历史价格与条款；保存为新报价，不覆盖原单。</p>}
         <p>{quotation.dirty ? "当前报价有未保存修改；生成／分享时自动保存。" : quotation.message}</p>
         <button onClick={() => void quotation.reload()} disabled={quotation.busy}>重新读取报价与品牌</button>
       </div>

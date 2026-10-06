@@ -204,6 +204,7 @@ export default function CloudCatalogPage() {
         <button disabled={busy || loading} onClick={() => void load()}>刷新云端产品</button>
         <Link href="/account">公司账号</Link>
         {context && <Link href={`/quotations?company=${context.companyId}`}>已保存报价</Link>}
+        {context && <Link href={`/customers?company=${context.companyId}`}>客户通讯录</Link>}
         {context?.role === "admin" && <Link href={`/team?company=${context.companyId}`}>员工与邀请</Link>}
         {context?.role === "admin" && <Link href={`/brand?company=${context.companyId}`}>公司品牌</Link>}
         {context?.role === "admin" && <Link href={`/catalog-settings?company=${context.companyId}`}>目录设置与导入</Link>}

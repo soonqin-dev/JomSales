@@ -5,6 +5,7 @@ import useCompanyScope from "../use-company-scope";
 import { createClient } from "../../lib/supabase/client";
 import { readBrand, saveBrand } from "../../lib/supabase/workspace";
 import { prepareUploadImage } from "../images";
+import QuoteDefaults from "./QuoteDefaults";
 
 function Editor({ context }) {
   const [previous, setPrevious] = useState(null), [draft, setDraft] = useState(null);
@@ -63,6 +64,7 @@ function Editor({ context }) {
       {(draft.logo || draft.logo_path) && <button type="button" onClick={() => edit({ logo: "", logo_path: null, logoError: "", removeLogo: true })}>移除 Logo</button>}
       <button type="submit">{busy ? "正在保存…" : "保存公司品牌"}</button>
     </fieldset></form>}
+    <QuoteDefaults context={context}/>
   </>;
 }
 export default function Brand() {

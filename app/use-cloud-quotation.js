@@ -1,8 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "../lib/supabase/client";
-import { readBrand, readQuotation, newDraft, saveQuotation, signedBrand } from "../lib/supabase/workspace";
-import { MAX_QUANTITY, quantityToMillis, lineCents } from "./quotation-utils";
+import { readBrand, readQuotation, newDraft, duplicateDraft, readQuotationDefaults, saveQuotation, signedBrand } from "../lib/supabase/workspace";
+import { MAX_QUANTITY, MAX_UNIT_PRICE, quantityToMillis, moneyToCents, lineCents } from "./quotation-utils";
 
 export default function useCloudQuotation(context) {
   const [draft, setDraft] = useState(null);
@@ -11,7 +11,7 @@ export default function useCloudQuotation(context) {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
-  const current = useRef(null), liveBrand = useRef(null), generation = useRef(0), working = useRef(false);
+  const current = useRef(null), liveBrand = useRef(null), liveDefaults = useRef({}), generation = useRef(0), working = useRef(false);
   function replace(value) { current.current = value; setDraft(value); }
 
   async function reload() {
@@ -22,12 +22,15 @@ export default function useCloudQuotation(context) {
     try {
       const client = createClient();
       const params = new URLSearchParams(window.location.search);
-      const id = current.current?.row.revision ? current.current.row.id : params.get("quote");
-      const [company, saved] = await Promise.all([readBrand(client, context.companyId), readQuotation(client, context, id)]);
+      const copying = !current.current && params.get("duplicate");
+      const id = current.current?.row.revision ? current.current.row.id : params.get("quote") || copying;
+      const [company, saved, defaults] = await Promise.all([readBrand(client, context.companyId), readQuotation(client, context, id), readQuotationDefaults(client, context.companyId)]);
       if (version !== generation.current) return;
-      liveBrand.current = company; setBrand(company); replace(saved || newDraft(company));
+      liveBrand.current = company; liveDefaults.current = defaults; setBrand(company);
+      replace(copying && saved ? duplicateDraft(saved, company, defaults) : saved || newDraft(company, defaults));
+      if (copying) setMessage("已复制为新报价草稿，请确认历史价格和条款。保存时分配新编号，不覆盖原报价。");
       // Selection is a one-time handoff. Re-entering/reloading starts a new quote.
-      const url = new URL(window.location.href); url.searchParams.delete("quote"); url.searchParams.delete("new");
+      const url = new URL(window.location.href); url.searchParams.delete("quote"); url.searchParams.delete("new"); url.searchParams.delete("duplicate");
       window.history.replaceState(null, "", url.pathname + url.search);
     } catch (err) { if (version === generation.current) { setError(`云端报价／公司资料读取失败：${err.message}。请确认已执行最新报价 SQL。当前草稿未清空。`); } }
     finally { if (version === generation.current) setLoading(false); }
@@ -47,11 +50,11 @@ export default function useCloudQuotation(context) {
       if (working.current || !current.current) return;
       const id = ++renewId, version = generation.current;
       try {
-        const company = await readBrand(createClient(), context.companyId);
+        const [company, defaults] = await Promise.all([readBrand(createClient(), context.companyId), readQuotationDefaults(createClient(), context.companyId)]);
         const value = current.current;
         const snapshot = value.row.revision ? await signedBrand(createClient(), value.company) : company;
         if (id !== renewId || version !== generation.current || working.current || value !== current.current) return;
-        liveBrand.current = company; setBrand(company); replace({ ...value, company: snapshot });
+        liveBrand.current = company; liveDefaults.current = defaults; setBrand(company); replace({ ...value, company: snapshot });
       } catch (err) { if (id === renewId && version === generation.current) setError(`公司品牌续期失败：${err.message}。请刷新确认权限。`); }
     }
     const timer = setInterval(renew, 120000); window.addEventListener("focus", renew);
@@ -96,9 +99,16 @@ export default function useCloudQuotation(context) {
     if (current.current.dirty && !window.confirm("未保存修改将被放弃，已保存报价会保留。开始新报价吗？")) return false;
     reset(); return true;
   }
+  function addTemporary(fields) {
+    const price = moneyToCents(fields.price), quantity = quantityToMillis(fields.quantity), name = fields.name.trim(), unit = fields.unit.trim();
+    if (!name || name.length > 240 || !unit || unit.length > 30 || price === null || price / 100 > MAX_UNIT_PRICE || quantity === null || (fields.description || "").length > 2000) throw new Error("请填写有效的临时项目名称、单位、数量和单价。");
+    if (!current.current || working.current || current.current.items.length >= 200) throw new Error("报价未就绪或已达到 200 项上限。");
+    const line = { product: { id: `temp-${crypto.randomUUID()}`, serial: "临时项目", name, unit, description: fields.description || "", is_service: fields.service === true, temporary: true }, quantity: quantity / 1000, unitPrice: price / 100 };
+    edit(prev => ({ ...prev, items: [...prev.items, { ...line, lineTotal: lineCents(line) / 100 }], temporaryDraft: null }));
+  }
   function reset() {
-    replace(newDraft(liveBrand.current)); setError(""); setMessage("新报价：生成／分享时自动保存到公司云端。");
-    const url = new URL(window.location.href); url.searchParams.delete("quote"); url.searchParams.delete("new");
+    replace(newDraft(liveBrand.current, liveDefaults.current)); setError(""); setMessage("新报价：生成／分享时自动保存到公司云端。");
+    const url = new URL(window.location.href); url.searchParams.delete("quote"); url.searchParams.delete("new"); url.searchParams.delete("duplicate");
     window.history.replaceState(null, "", url.pathname + url.search);
   }
   function complete(id) {
@@ -106,8 +116,9 @@ export default function useCloudQuotation(context) {
     reset(); return true;
   }
   return { ...draft, brand, loading, busy, error, message,
-    ready: !loading && !!draft, save, add, startNew, reload, complete,
+    ready: !loading && !!draft, save, add, addTemporary, startNew, reload, complete,
     markDirty: () => edit(prev => prev),
+    setTemporaryDraft: value => edit(prev => ({ ...prev, temporaryDraft: value })),
     setItems: value => edit(prev => ({ ...prev, items: typeof value === "function" ? value(prev.items) : value })),
     setDetails: value => edit(prev => ({ ...prev, details: typeof value === "function" ? value(prev.details) : value })) };
 }

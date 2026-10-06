@@ -4,9 +4,11 @@ import { useEffect, useRef, useState } from "react";
 import useCompanyScope from "../use-company-scope";
 import { createClient } from "../../lib/supabase/client";
 import { listQuotations, manageQuotation } from "../../lib/supabase/workspace";
+import { quoteStatus,formatAmount } from "../quotation-utils";
 function List({ context }) {
   const [rows, setRows] = useState([]), [error, setError] = useState(""), [loading, setLoading] = useState(true);
   const [trash, setTrash] = useState(false), [search, setSearch] = useState(""), [status, setStatus] = useState("all"), [busy, setBusy] = useState(false);
+  const [events,setEvents]=useState({});
   const sequence = useRef(0), working = useRef(false);
   async function load() {
     const version = ++sequence.current; setLoading(true); setError(""); setRows([]);
@@ -18,6 +20,7 @@ function List({ context }) {
   async function act(row, action) {
     if (working.current) return;
     if (action === "trash" && !window.confirm(`报价 ${row.number} 将移入回收站，15天后永久删除，期间可以恢复。继续吗？`)) return;
+    if ((action==="paid" || (row.status==="paid" && ['pending','success'].includes(action))) && !window.confirm(action==="paid" ? `确认 ${row.number} 已全额收款？这是人工记录，不会执行支付。` : `更正 ${row.number} 的 Paid 状态？更正会记录操作人和时间。`)) return;
     working.current = true; setBusy(true); setError("");
     const version = sequence.current;
     try {
@@ -42,7 +45,7 @@ function List({ context }) {
     <div className="quotationHistoryFilters">
     <label>搜索报价<input value={search} onChange={e => setSearch(e.target.value)} placeholder="报价编号、客户或员工邮箱" /></label>
     <label>报价状态<select value={status} onChange={e => setStatus(e.target.value)}>
-      <option value="all">全部</option><option value="pending">Pending · 待确认</option><option value="success">Success · 已成交</option>
+      <option value="all">全部</option><option value="pending">Pending · 待确认</option><option value="success">Success · 已成交</option><option value="paid">Paid · 人工确认全额收款</option>
     </select></label>
     </div>
     {loading && <p role="status">正在读取…</p>}{error && <p role="alert" className="accountError">{error}</p>}
@@ -50,19 +53,24 @@ function List({ context }) {
     {visible.map(row => <article className="accountCard quotationHistoryRow" key={row.id}>
       <strong>{row.number}</strong><p>{row.customer_name || "未填写客户"} · {row.quote_date}</p>
       <p>所属员工：{row.creator_name || row.creator_email || row.created_by}{row.created_by === context.userId ? "（我）" : ""}</p>
-      <p>状态：{row.status === "success" ? "Success · 已成交（不代表已收款）" : "Pending · 待客户确认"}</p>
+      <p>状态：{quoteStatus(row.status)} · {formatAmount(row.total_amount)}</p>
       <div className="cloudButtons">
         {trash ? <>
           <p>可恢复至：{new Date(new Date(row.deleted_at).getTime() + 15 * 86400000).toLocaleString()}</p>
           <button disabled={busy || loading} onClick={() => act(row, "restore")}>恢复报价</button>
         </> : <>
           {busy ? <span>正在更新…</span> : <Link href={`/cloud?company=${context.companyId}&quote=${row.id}`}>选择报价</Link>}
-          <button disabled={busy || loading} onClick={() => act(row, row.status === "success" ? "pending" : "success")}>
-            {row.status === "success" ? "标记为 Pending" : "标记为 Success（客户已成交）"}
+          {!busy&&<Link href={`/cloud?company=${context.companyId}&duplicate=${row.id}`}>复制为新报价</Link>}
+          <button disabled={busy || loading} onClick={() => act(row, row.status !== "pending" ? "pending" : "success")}>
+            {row.status !== "pending" ? "标记为 Pending" : "标记为 Success（客户已成交）"}
           </button>
+          {row.status!=="paid"&&<button disabled={busy||loading} onClick={()=>act(row,"paid")}>标记为 Paid（已全额收款）</button>}
+          {row.status==="paid"&&<button disabled={busy||loading} onClick={()=>act(row,"success")}>更正为 Success</button>}
           <button className="deleteButton" disabled={busy || loading} onClick={() => act(row, "trash")}>删除报价</button>
         </>}
       </div>
+      <button disabled={busy||loading} onClick={async()=>{try{const result=await createClient().from("quotation_events").select("id,action,actor,details,created_at").eq("quote_id",row.id).eq("company_id",context.companyId).order("created_at",{ascending:false}).limit(100);if(result.error)throw result.error;setEvents(prev=>({...prev,[row.id]:result.data}));}catch(err){setError(err.message);}}}>查看最近操作记录</button>
+      {events[row.id]&&<ul>{events[row.id].map(event=><li key={event.id}>{new Date(event.created_at).toLocaleString()} · {({created:"创建",edited:"修改",status:"状态更新",trashed:"移入回收箱",restored:"恢复"})[event.action]||event.action} · {event.details.actor_name || event.details.actor_email || event.actor || "系统"} · {quoteStatus(event.details.status)}</li>)}</ul>}
     </article>)}
   </>;
 }

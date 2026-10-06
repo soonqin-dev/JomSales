@@ -8,7 +8,7 @@ function createFixture(port=54329) {
   const origin=`http://localhost:${port}`,CA=uuid(10),CB=uuid(11);
   const users=Object.fromEntries(["owner","sales","peer","other","disabled","new"].map((key,i)=>[key,{id:uuid(i+1),email:`${key}@example.test`,aud:"authenticated",role:"authenticated",app_metadata:{},user_metadata:{},email_confirmed_at:new Date().toISOString(),created_at:new Date().toISOString()}]));
   const companies=[{id:CA,name:"Company A",contact:"A phone",logo_path:null,brand_revision:1},{id:CB,name:"Company B",contact:"B phone",logo_path:null,brand_revision:1}];
-  const members=Object.entries(users).filter(([key])=>key!=="new").map(([key,user])=>({company_id:key==="other"?CB:CA,user_id:user.id,role:["owner","other"].includes(key)?"admin":"sales",active:key!=="disabled",can_manage_products:false}));
+  const members=Object.entries(users).filter(([key])=>key!=="new").map(([key,user])=>({company_id:key==="other"?CB:CA,user_id:user.id,role:["owner","other"].includes(key)?"admin":"sales",is_primary:["owner","other"].includes(key),active:key!=="disabled",can_manage_products:false}));
   const image=`${CA}/${uuid(20)}/${uuid(30)}.png`;
   const products=[{id:uuid(20),company_id:CA,serial:"P-001",name:"Cloud Widget",tags:["Tools"],price:12.5,image_path:image,revision:1,source_key:null,deleted_at:null,created_at:new Date().toISOString()},
     {id:uuid(21),company_id:CB,serial:"B-001",name:"Company B only",tags:[],price:20,image_path:null,revision:1,source_key:null,deleted_at:null,created_at:new Date().toISOString()}];
@@ -16,6 +16,11 @@ function createFixture(port=54329) {
   const png=Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jZHkAAAAASUVORK5CYII=","base64");
   const state={failQuote:false,failBrand:false,failSign:false,failImport:false,failProductReply:false};
   const numbering=new Map(),reservations=new Map(),importResults=new Map();
+  const quoteDefaults=new Map(),quoteSequences=new Map(),customers=[],events=[];
+  const defaults=co=>{if(!quoteDefaults.has(co))quoteDefaults.set(co,{company_id:co,prefix:"Q",digits:5,validity_days:14,payment_terms:"",notes:"",revision:1});return quoteDefaults.get(co);};
+  const amount=q=>(q.items.reduce((sum,line)=>sum+Number((BigInt(Math.round(line.unitPrice*100))*BigInt(Math.round(line.quantity*1000))+500n)/1000n),0)-Math.round(Number(q.discount)*100))/100;
+  function event(q,action){events.push({id:randomUUID(),quote_id:q.id,company_id:q.company_id,actor:currentActor,action,details:{status:q.status,actor_email:Object.values(users).find(u=>u.id===currentActor)?.email,number:q.number,total:String(q.total_amount)},created_at:new Date().toISOString()});}
+  let currentActor=null;
   const numberSettings=co=>{if(!numbering.has(co))numbering.set(co,{company_id:co,automatic:true,prefix:"P-",digits:5,next_number:1,revision:1});return numbering.get(co);};
   function session(user) {
     const access_token=`${encode({alg:"HS256",typ:"JWT"})}.${encode({sub:user.id,exp:Math.floor(Date.now()/1000)+3600,role:"authenticated"})}.${randomUUID()}`;
@@ -29,6 +34,7 @@ function createFixture(port=54329) {
     const chunks=[];for await(const chunk of req)chunks.push(chunk);const raw=Buffer.concat(chunks).toString();
     let body={};try{body=JSON.parse(raw||"{}");}catch{}
     const user=tokens.get(req.headers.authorization?.replace(/^Bearer /,""));
+    currentActor=user?.id||null;
     const own=members.filter(m=>m.user_id===user?.id&&m.active),member=co=>own.find(m=>m.company_id===co);
     const writer=co=>member(co)?.role==="admin"||member(co)?.can_manage_products===true;
     const eq=k=>url.searchParams.get(k)?.replace(/^eq\./,"");
@@ -42,6 +48,14 @@ function createFixture(port=54329) {
       else if(path==="/auth/v1/logout") {if(user)tokens.delete(req.headers.authorization.replace(/^Bearer /,""));data={};}
       else if(path==="/rest/v1/company_members") data=own.filter(match).map(m=>({...m,companies:companies.find(c=>c.id===m.company_id)}));
       else if(path==="/rest/v1/companies") data=companies.filter(c=>member(c.id)&&match(c));
+      else if(path==="/rest/v1/customers"){
+        const visible=customers.filter(c=>member(c.company_id)&&(member(c.company_id).role==="admin"||c.created_by===user.id)&&match(c));
+        if(method==="POST"){
+          if(!member(body.company_id))throw Error("Customer access denied");if(customers.some(c=>c.id===body.id))throw Error("Duplicate customer");
+          const row={...body,created_by:user.id,active:true,revision:1,created_at:new Date().toISOString()};customers.unshift(row);data=[row];
+        }else if(method==="PATCH")data=visible.filter(c=>c.created_by===user.id).map(c=>Object.assign(c,body,{revision:c.revision+1}));
+        else data=visible;
+      }else if(path==="/rest/v1/quotation_events")data=events.filter(e=>member(e.company_id)&&(member(e.company_id).role==="admin"||quotations.find(q=>q.id===e.quote_id)?.created_by===user.id)&&match(e));
       else if(path==="/rest/v1/products") {
         let matching=products.filter(p=>member(p.company_id)&&match(p)&&(url.searchParams.get("deleted_at")!=="is.null"||!p.deleted_at));
         if(method==="POST") {
@@ -58,9 +72,29 @@ function createFixture(port=54329) {
           if(!member(body.company_id))throw Error("Permission denied");
           if(quotations.some(q=>q.id===body.id||(body.source_key&&q.source_key===body.source_key&&q.company_id===body.company_id&&q.created_by===user.id)))throw Error("Duplicate quote");
           const co=companies.find(c=>c.id===body.company_id),row={...body,created_by:user.id,creator_email:user.email,status:"pending",deleted_at:null,company_snapshot:{name:co.name,contact:co.contact,logo_path:co.logo_path},revision:1,updated_at:new Date().toISOString(),created_at:new Date().toISOString()};quotations.unshift(row);data=[row];
-        }else if(method==="PATCH")data=matching.filter(q=>!q.deleted_at).map(q=>Object.assign(q,body,{revision:q.revision+1,updated_at:new Date().toISOString()}));
+        }else if(method==="PATCH")data=matching.filter(q=>!q.deleted_at).map(q=>{Object.assign(q,body,{revision:q.revision+1,updated_at:new Date().toISOString()});q.total_amount=amount(q).toFixed(2);event(q,"edited");return q;});
         else data=matching.sort((a,b)=>b.updated_at.localeCompare(a.updated_at));
       } else if(path==="/rest/v1/rpc/is_platform_admin")data=false;
+      else if(path==="/rest/v1/rpc/get_quotation_defaults"){if(!member(body.target_company))throw Error("Company access denied");data=defaults(body.target_company);}
+      else if(path==="/rest/v1/rpc/save_quotation_defaults"){
+        if(member(body.target_company)?.role!=="admin")throw Error("Administrator access required");const row=defaults(body.target_company);
+        if(row.revision!==body.expected_revision)throw Error("Settings changed");data=Object.assign(row,{prefix:body.number_prefix,digits:body.number_digits,validity_days:body.valid_days,payment_terms:body.payment_text,notes:body.default_notes,revision:row.revision+1});
+      }else if(path==="/rest/v1/rpc/search_company_customers"){
+        if(!member(body.target_company))throw Error("Company access denied");const visible=customers.filter(c=>c.company_id===body.target_company&&(member(c.company_id).role==="admin"||c.created_by===user.id)&&(body.include_inactive||c.active)&&[c.name,c.company,c.phone,c.email].join(" ").toLowerCase().includes(body.search_text.toLowerCase()));data={items:visible.slice(body.page_offset,body.page_offset+50),total:visible.length};
+      }else if(path==="/rest/v1/rpc/create_quotation"){
+        if(state.failQuote){state.failQuote=false;throw Error("Simulated quote save failure");}
+        if(!member(body.target_company))throw Error("Company access denied");
+        const existing=quotations.find(q=>q.id===body.target_quote);
+        if(existing){if(existing.company_id!==body.target_company||existing.created_by!==user.id)throw Error("Quote unavailable");data=existing;}
+        else{const co=companies.find(c=>c.id===body.target_company),p=body.payload,d=defaults(co.id),key=co.id+p.quote_date.slice(0,4),seq=(quoteSequences.get(key)||0)+1;quoteSequences.set(key,seq);
+          const row={...p,id:body.target_quote,company_id:co.id,created_by:user.id,creator_email:user.email,status:"pending",deleted_at:null,confirmed_at:null,paid_at:null,number:`${d.prefix}-${p.quote_date.slice(0,4)}-${String(seq).padStart(d.digits,"0")}`,company_snapshot:{name:co.name,contact:co.contact,logo_path:co.logo_path},revision:1,created_at:new Date().toISOString(),updated_at:new Date().toISOString()};row.total_amount=amount(row).toFixed(2);quotations.unshift(row);event(row,"created");data=row;}
+      }else if(path==="/rest/v1/rpc/company_sales_report"){
+        if(member(body.target_company)?.role!=="admin")throw Error("Administrator access required");
+        const begin=Date.parse(body.start_date+"T00:00:00+08:00"),finish=Date.parse(body.end_date+"T23:59:59.999+08:00"),inRange=date=>date&&Date.parse(date)>=begin&&Date.parse(date)<=finish;
+        const rows=members.filter(m=>m.company_id===body.target_company).map(m=>{const own=quotations.filter(q=>q.company_id===m.company_id&&q.created_by===m.user_id&&!q.deleted_at),won=own.filter(q=>["success","paid"].includes(q.status)&&inRange(q.confirmed_at)),paid=own.filter(q=>q.status==="paid"&&inRange(q.paid_at));const goods=new Map();
+          for(const q of won)for(const line of q.items)if(line.product.is_service===false)goods.set(line.product.unit,(goods.get(line.product.unit)||0)+line.quantity);
+          const u=Object.values(users).find(u=>u.id===m.user_id);return{...m,name:u.email,email:u.email,quote_count:own.filter(q=>inRange(q.created_at)).length,confirmed_count:won.length,confirmed_amount:won.reduce((sum,q)=>sum+amount(q),0).toFixed(2),paid_amount:paid.reduce((sum,q)=>sum+amount(q),0).toFixed(2),goods:[...goods].map(([unit,quantity])=>({unit,quantity:String(quantity)}))};});data={rows:rows.sort((a,b)=>Number(b.confirmed_amount)-Number(a.confirmed_amount)),legacy_undated:0};
+      }
       else if(path==="/rest/v1/rpc/search_company_products") {
         if(!member(body.target_company))throw Error("Company access denied");
         if(body.search_text==="slow")await new Promise(resolve=>setTimeout(resolve,800));
@@ -103,16 +137,16 @@ function createFixture(port=54329) {
         } else {
           if(q.deleted_at)throw Error("Restore quotation before editing");
           if(body.action==="trash")q.deleted_at=new Date().toISOString();
-          else if(["pending","success"].includes(body.action))q.status=body.action;
+          else if(["pending","success","paid"].includes(body.action)){q.status=body.action;if(body.action==="pending"){q.confirmed_at=null;q.paid_at=null;}else{q.confirmed_at||=new Date().toISOString();q.paid_at=body.action==="paid"?new Date().toISOString():null;}}
           else throw Error("Invalid quotation action");
         }
-        data=Object.assign(q,{revision:q.revision+1,updated_at:new Date().toISOString()});
+        data=Object.assign(q,{revision:q.revision+1,updated_at:new Date().toISOString()});event(q,body.action);
       } else if(path==="/rest/v1/rpc/save_company_brand") {
         if(state.failBrand){state.failBrand=false;throw Error("Simulated brand save failure");}
         const co=companies.find(c=>c.id===body.target_company);
         if(member(co?.id)?.role!=="admin"||co.brand_revision!==body.expected_revision)throw Error("Permission/revision conflict");
         data=Object.assign(co,{name:body.company_name,contact:body.company_contact,logo_path:body.new_logo_path,brand_revision:co.brand_revision+1});
-      } else if(path==="/rest/v1/rpc/get_company_team_permissions") {
+      } else if(["/rest/v1/rpc/get_company_team_permissions","/rest/v1/rpc/get_company_roster"].includes(path)) {
         if(member(body.target_company)?.role!=="admin")throw Error("Permission denied");
         data=members.filter(m=>m.company_id===body.target_company).map(m=>({...m,email:Object.values(users).find(u=>u.id===m.user_id).email}));
       } else if(path==="/rest/v1/rpc/get_company_invitations")data=[];
@@ -137,6 +171,6 @@ function createFixture(port=54329) {
     } catch(err) {status=400;data={message:err.message,code:"FIXTURE"};}
     res.writeHead(status,{"Content-Type":"application/json"});res.end(JSON.stringify(data));
   });
-  return {server,origin,users,companies,members,products,quotations,state,png,requests,session,CA,CB};
+  return {server,origin,users,companies,members,products,quotations,customers,events,state,png,requests,session,CA,CB};
 }
 module.exports={createFixture};

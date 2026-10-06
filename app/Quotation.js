@@ -5,6 +5,8 @@ import Link from "next/link";
 import { MAX_QUANTITY, MAX_UNIT_PRICE, formatMoney, lineCents, moneyToCents,
   quotationTotals, quantityToMillis } from "./quotation-utils";
 import { canShareFile, downloadFile } from "./share";
+import CustomerPicker from "./CustomerPicker";
+import TemporaryItem from "./TemporaryItem";
 const signature = (items, details, company, edits = {}) => JSON.stringify({ items, details,
   company: { name: company.name, contact: company.contact, logo_path: company.logo_path }, edits });
 
@@ -63,7 +65,8 @@ export default function Quotation({ quotation, context, onBack, onComplete }) {
   async function generatePdf(event, prepareShare = false) {
     event.preventDefault();
     if (locked || !items.length || invalidRows || totals.total === null) return;
-    if (!details.customerName.trim() || !company.name.trim() || !details.date || !details.number.trim()) {
+    if (quotation.temporaryDraft) { setMessage("临时项目还未加入，请先加入本张报价或清空临时输入。"); return; }
+    if (!details.customerName.trim() || !company.name.trim() || !details.date) {
       setMessage("请填写客户名称、公司名称和报价日期。");
       return;
     }
@@ -116,15 +119,17 @@ export default function Quotation({ quotation, context, onBack, onComplete }) {
         </button>
       </div>
       <header className="quotationHeading">
-        <div className="eyebrow">SALESGO · QUOTATION</div>
+        <div className="eyebrow">JOMSALES · QUOTATION</div>
         <h1>报价清单</h1>
         <p className="activeQuotation">{quotation.row.revision ? `正在编辑：${details.number}` : "新报价"}</p>
+        {quotation.copiedFrom&&<p>复制自 {quotation.copiedFrom}，请确认历史价格与条款。保存为新报价，不覆盖原单。</p>}
         <p>编辑产品，填写客户资料，生成报价 PDF。</p>
       </header>
       {error && <p className="quotationError" role="alert">{error}</p>}
       <p role="status">{quotation.dirty ? "有未保存修改（仅在当前页面内存）。生成／分享时自动保存。" : quotation.message || "生成／分享时自动保存到公司云端。"}</p>
       {company.logoError && <p className="quotationError" role="alert">{company.logoError}</p>}
       <Link href={`/quotations?company=${context.companyId}`}>已保存报价</Link>
+      <TemporaryItem quotation={quotation} disabled={locked}/>
 
       <form onSubmit={event => generatePdf(event)}>
         <fieldset className="quotationFields" disabled={locked}>
@@ -144,7 +149,7 @@ export default function Quotation({ quotation, context, onBack, onComplete }) {
               return (
                 <article className="quotationItem" key={item.product.id}>
                   <div className="quotationItemHeading">
-                    <div><h3>{item.product.name}</h3><p>{item.product.serial} · {item.product.unit || "件"}{item.product.is_service && " · 服务"}</p>{item.product.description && <p>{item.product.description}</p>}</div>
+                    <div><h3>{item.product.name}</h3><p>{item.product.serial} · {item.product.unit || "件"}{item.product.is_service && " · 服务"}{item.product.temporary && " · 不进入目录"}</p>{item.product.description && <p>{item.product.description}</p>}</div>
                     <button type="button" className="deleteButton" aria-label={`移除 ${item.product.name}`}
                       onClick={() => removeItem(item.product.id)}>移除</button>
                   </div>
@@ -169,10 +174,18 @@ export default function Quotation({ quotation, context, onBack, onComplete }) {
 
           <section className="quotationSection" aria-labelledby="quotationCustomerTitle">
             <h2 id="quotationCustomerTitle">客户资料</h2>
+            <CustomerPicker context={context} disabled={locked} onSelect={row=>setDetails(prev=>({...prev,customerName:row.name,customerCompany:row.company,phone:row.phone,email:row.email,address:row.address,customerId:row.id}))}/>
+            {details.customerId&&<button type="button" onClick={()=>updateDetails("customerId",null)}>取消通讯录关联（保留本张资料）</button>}
+            <Link href={`/customers?company=${context.companyId}`}>管理客户通讯录</Link>
             <label>客户名称 *
               <input value={details.customerName} required maxLength={120} autoComplete="name"
                 onChange={e => updateDetails("customerName", e.target.value)} placeholder="客户或公司名称" />
             </label>
+            <details><summary>客户公司、邮箱与地址</summary>
+              <label>客户公司<input maxLength={120} value={details.customerCompany || ""} onChange={e=>updateDetails("customerCompany",e.target.value)}/></label>
+              <label>客户邮箱<input type="email" maxLength={254} value={details.email || ""} onChange={e=>updateDetails("email",e.target.value)}/></label>
+              <label>客户地址<textarea aria-label="客户地址" rows={2} maxLength={1000} value={details.address || ""} onChange={e=>updateDetails("address",e.target.value)}/></label>
+            </details>
             <label>客户电话
               <input type="tel" value={details.phone} maxLength={40} autoComplete="tel"
                 onChange={e => updateDetails("phone", e.target.value)} placeholder="例如 +60 12 345 6789" />
@@ -181,11 +194,15 @@ export default function Quotation({ quotation, context, onBack, onComplete }) {
 
           <section className="quotationSection" aria-labelledby="quotationInfoTitle">
             <h2 id="quotationInfoTitle">报价资料</h2>
-            <label>报价编号<input value={details.number} readOnly /></label>
+            <label>报价编号<input value={details.number || "保存时自动分配"} readOnly /></label>
             <label>日期 *<input type="date" value={details.date} required
               onChange={e => updateDetails("date", e.target.value)} /></label>
             <label>备注<textarea aria-label="备注" value={details.notes} maxLength={3000} rows={3}
               onChange={e => updateDetails("notes", e.target.value)} placeholder="例如报价有效期、交货说明" /></label>
+            <details><summary>有效期与付款条款</summary>
+              <label>有效天数<input type="number" min={1} max={365} value={details.validityDays || ""} placeholder="未设置" onChange={e=>updateDetails("validityDays",e.target.value)}/></label>
+              <label>付款条款<textarea aria-label="付款条款" rows={3} maxLength={1500} value={details.paymentTerms || ""} onChange={e=>updateDetails("paymentTerms",e.target.value)}/></label>
+            </details>
             <label>折扣（RM）<input type="number" min="0" step="0.01" inputMode="decimal"
               value={details.discount} aria-invalid={totals.total === null}
               onChange={e => updateDetails("discount", e.target.value)} /></label>
