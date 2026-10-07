@@ -33,8 +33,8 @@ export default function CatalogSettings() {
   }, []);
   const busyFor = name => value => setBusyMap(prev => (prev[name] === value ? prev : { ...prev, [name]: value }));
   const blockedBy = name => Object.entries(busyMap).some(([key, value]) => key !== name && value);
+  // Each tool guards its own unsaved input or running job; plain reads never block leaving.
   const anyBusy = Object.values(busyMap).some(Boolean);
-  useLeaveGuard(false, { blocked: anyBusy });
 
   function choose(next) {
     if (anyBusy) return;

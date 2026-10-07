@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { createClient } from "../../../lib/supabase/client";
 import { readQuotationDefaults } from "../../../lib/supabase/workspace";
 import { useMember } from "../../member-context";
-import { InlineError, MoreMenu, SkeletonList, useConfirm, useToast } from "../../ui";
+import { InlineError, MoreMenu, SkeletonList, useConfirm, useLeaveGuard, useToast } from "../../ui";
 
 export default function QuoteDefaults({ onDirty }) {
   const member = useMember(), confirm = useConfirm(), toast = useToast();
@@ -24,11 +24,7 @@ export default function QuoteDefaults({ onDirty }) {
     finally { working.current = false; setBusy(false); }
   }
   useEffect(() => { void load(false); return () => { ++sequence.current; }; }, []);
-  useEffect(() => {
-    const leave = e => { if (dirty || busy) { e.preventDefault(); e.returnValue = ""; } };
-    window.addEventListener("beforeunload", leave);
-    return () => window.removeEventListener("beforeunload", leave);
-  }, [dirty, busy]);
+  useLeaveGuard(dirty, { message: "报价默认设置还没保存。" });
 
   const edit = (key, value) => { setDraft(prev => ({ ...prev, [key]: value })); setDirty(true); };
 

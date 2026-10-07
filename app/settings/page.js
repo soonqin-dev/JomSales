@@ -11,7 +11,7 @@ export default function Settings() {
   if (setup === null) return <main className="app-main no-nav" />;
   return (
     <main className="app-main no-nav">
-      {setup ? <TopBar title="补齐个人资料" /> : <TopBar title="个人设置" back="/me" />}
+      {setup ? <TopBar title="补齐个人资料" /> : <TopBar title="个人设置" back />}
       <div className="stack">
         <ProfileForm setup={setup} />
         {!setup && <><h2 className="section-title" style={{ marginTop: 8 }}>账号安全</h2><SecurityPanel /></>}

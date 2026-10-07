@@ -1,21 +1,17 @@
 "use client";
-
+// AUTH.JOIN — docs/auth-spec.md §5.5. Flow unchanged; adds the email-mismatch state.
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
 import { captureInvite, INVITE_KEY, teamError } from "../../lib/supabase/invitations";
+import { InlineError, SkeletonList, useToast } from "../ui";
+import Icon from "../icons";
 
 export default function JoinPage() {
-  const [user, setUser] = useState(null);
-  const [invite, setInvite] = useState(null);
-  const [joined, setJoined] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const token = useRef(null);
-  const identity = useRef(null);
-  const generation = useRef(0);
-  const working = useRef(false);
+  const toast = useToast();
+  const [user, setUser] = useState(null), [invite, setInvite] = useState(null), [joined, setJoined] = useState(null);
+  const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const token = useRef(null), identity = useRef(null), generation = useRef(0), working = useRef(false);
 
   async function load() {
     if (working.current || !token.current) return;
@@ -44,13 +40,8 @@ export default function JoinPage() {
       token.current = captureInvite();
       subscription = createClient().auth.onAuthStateChange((event, session) => {
         const changed = (session?.user.id || null) !== identity.current;
-        if (!session || changed) {
-          ++generation.current; identity.current = session?.user.id || null;
-          setUser(session?.user || null); setInvite(null); setJoined(null); setError("");
-        }
-        if (event === "INITIAL_SESSION" || event === "SIGNED_OUT" || (event === "SIGNED_IN" && changed)) {
-          clearTimeout(timer); timer = setTimeout(() => void load(), 0);
-        }
+        if (!session || changed) { ++generation.current; identity.current = session?.user.id || null; setUser(session?.user || null); setInvite(null); setJoined(null); setError(""); }
+        if (event === "INITIAL_SESSION" || event === "SIGNED_OUT" || (event === "SIGNED_IN" && changed)) { clearTimeout(timer); timer = setTimeout(() => void load(), 0); }
       }).data.subscription;
       void load();
     } catch (err) { setError(err.message); setLoading(false); }
@@ -73,28 +64,45 @@ export default function JoinPage() {
     finally { working.current = false; setBusy(false); }
   }
 
-  return <main className="page accountPage">
-    <Link href="/account">← 公司账号</Link>
-    <h1>加入公司</h1>
-    <p className="notice">加入后使用该公司的云端产品和自己的云端报价。公司资料不会保存到浏览器作为本地数据库。</p>
-    {loading && <p role="status">正在检查邀请…</p>}
-    {error && <p className="accountError" role="alert">{error}</p>}
-    {!loading && !user && !error && <section className="accountCard">
-      <h2>请先登录受邀邮箱</h2>
-      <p>没有账号？使用管理员指定的邮箱注册并验证，再回到这里接受邀请。员工无需创建公司。</p>
-      <p><Link href="/account">注册／登录 →</Link></p>
-      <p>如果验证邮件在另一浏览器或标签页打开，请验证后重新打开原始邀请链接。</p>
-    </section>}
-    {user && !joined && <p>当前账号：{user.email}。<Link href="/account">需要换账号？前往退出并重新登录</Link></p>}
-    {!loading && invite && <section className="accountCard">
-      <h2>{invite.company_name}</h2><p>受邀邮箱：{invite.email}</p><p>角色：{invite.invite_role === "primary" ? "正管理员（由平台开通）" : "销售员（默认只读，产品管理权限由管理员设置）"}</p>
-      <p>{invite.already_accepted ? "你曾接受此邀请，将重新确认当前权限。" : `到期：${new Date(invite.expires_at).toLocaleString()}`}</p>
-      <button disabled={busy} onClick={() => void accept()}>{busy ? "正在加入…" : invite.already_accepted ? "确认公司访问权限" : "接受邀请并加入公司"}</button>
-    </section>}
-    {joined && <section className="accountCard" role="status"><h2>已加入公司</h2>
-      <p>你已获得公司访问权限，可到公司云端查阅产品；产品管理权限由管理员设置。</p>
-      <Link href={`/cloud?company=${joined}`}>进入公司云端产品 →</Link>
-    </section>}
-    {!loading && !joined && token.current && <button disabled={busy} onClick={() => void load()}>重新检查邀请</button>}
-  </main>;
+  // AUTH.JOIN.CHANGE_ACCOUNT: sign out, keep the invitation in this tab, log in again.
+  async function changeAccount() {
+    setBusy(true);
+    try { const result = await createClient().auth.signOut({ scope: "local" }); if (result.error) throw result.error; window.location.replace("/account"); }
+    catch (err) { toast(`退出失败：${err.message}`); setBusy(false); }
+  }
+
+  const mismatch = invite && user && invite.email && user.email && invite.email.toLowerCase() !== user.email.toLowerCase();
+  return (
+    <main className="auth-main">
+      <div className="auth-logo" style={{ margin: "40px auto 32px" }}>JOM<br />SALES</div>
+      <div className="stack">
+        <h1 className="auth-title">{joined ? "已加入公司" : "加入公司"}</h1>
+        {loading && <SkeletonList count={2} height={64} />}
+        {error && <InlineError>{error}</InlineError>}
+        {error && user && <button type="button" className="btn btn-secondary btn-block" disabled={busy} onClick={changeAccount}>换账号</button>}
+        {!loading && !user && !error && <>
+          <p className="auth-sub">请先登录受邀邮箱。没有账号？用管理员指定的邮箱注册并验证，再回到这里接受邀请。</p>
+          <Link href="/account" className="btn btn-primary btn-block">登录／注册</Link>
+        </>}
+        {!loading && invite && !joined && <section className="card stack-sm">
+          <p className="card-title">{invite.company_name}</p>
+          <p className="small muted">受邀邮箱：{invite.email}</p>
+          {mismatch && <p className="small muted">当前登录：{user.email}</p>}
+          <p className="small muted">角色：{invite.invite_role === "primary" ? "正管理员" : "销售员（产品管理权限由管理员设置）"}</p>
+          {!invite.already_accepted && <p className="small muted">到期：{new Date(invite.expires_at).toLocaleDateString("sv-SE")}</p>}
+        </section>}
+        {!loading && invite && mismatch && <>
+          <InlineError>这个邀请是发给 {invite.email} 的。你现在登录的是 {user.email}。</InlineError>
+          <button type="button" className="btn btn-primary btn-block" disabled={busy} onClick={changeAccount}>换账号</button>
+        </>}
+        {!loading && invite && !mismatch && !joined && <button type="button" className="btn btn-primary btn-block" disabled={busy} onClick={() => void accept()}>
+          {busy ? "正在加入…" : invite.already_accepted ? "重新确认公司权限" : "接受邀请并加入公司"}</button>}
+        {joined && <>
+          <div className="empty-state" style={{ color: "var(--ok)" }}><Icon name="check" size={48} /><p>你已获得公司访问权限。</p></div>
+          <Link href={`/cloud?company=${joined}`} className="btn btn-primary btn-block">进入公司</Link>
+        </>}
+        {!loading && !joined && token.current && (error || !invite) && user && <button type="button" className="btn btn-secondary btn-block" disabled={busy} onClick={() => void load()}>重新检查邀请</button>}
+      </div>
+    </main>
+  );
 }

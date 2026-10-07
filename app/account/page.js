@@ -1,160 +1,279 @@
 "use client";
-
+// AUTH.LOGIN / AUTH.REGISTER (4 steps) / AUTH.VERIFY / AUTH.WAIT — docs/auth-spec.md, Figma docs/figma/AUTH.png.
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { createClient } from "../../lib/supabase/client";
 import { pendingInvite } from "../../lib/supabase/invitations";
-import { canManageProducts } from "../../lib/supabase/permissions";
-import { memberLabel, profileFields, validatePassword,PASSWORD_MIN_LENGTH,PASSWORD_MAX_LENGTH } from "../../lib/account-utils";
+import { completeCompanyProfile, normalizeMalaysiaPhone, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "../../lib/account-utils";
+import { companyProfileSetupUrl } from "../../lib/supabase/company-profile";
+import { InlineError, PasswordInput, SkeletonList, useToast } from "../ui";
+import Icon from "../icons";
+
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+function useCountdown() {
+  const [left, setLeft] = useState(0);
+  useEffect(() => { if (!left) return; const timer = setTimeout(() => setLeft(n => n - 1), 1000); return () => clearTimeout(timer); }, [left]);
+  return [left, () => setLeft(60)];
+}
+
+// Supabase errors are never shown raw; account existence is never revealed.
+function loginError(error) {
+  const code = error?.code || "", message = error?.message || "", status = error?.status;
+  if (code === "email_not_confirmed" || /email not confirmed/i.test(message)) return { kind: "unconfirmed", text: "这个邮箱还没有验证。请先点开验证邮件里的链接。" };
+  if (status === 429 || /rate limit|too many/i.test(code + message)) return { kind: "rate", text: "尝试次数过多，请稍后再试。" };
+  if (error instanceof TypeError || /fetch|network/i.test(message)) return { kind: "network", text: "无法连接，请检查网络后重试。" };
+  if (code === "invalid_credentials" || status === 400) return { kind: "credentials", text: "邮箱或密码不正确。" };
+  return { kind: "other", text: "登录未完成，请稍后重试。" };
+}
+const requestError = error => (error?.status === 429 || /rate limit/i.test(error?.message || "")) ? "尝试次数过多，请稍后再试。" : "暂时无法发送，请检查网络后重试。";
 
 export default function AccountPage() {
-  const [user, setUser] = useState(null);
-  const [memberships, setMemberships] = useState([]);
-  const [membershipLoaded, setMembershipLoaded] = useState(false);
-  const [mode, setMode] = useState("login");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [displayName, setDisplayName] = useState("");
-  const [platformAdmin, setPlatformAdmin] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [message, setMessage] = useState("");
-  const [hasInvite, setHasInvite] = useState(false);
-  const revision = useRef(0);
+  const [state, setState] = useState({ phase: "loading" });
+  const [view, setView] = useState("login");
+  const [invite, setInvite] = useState(false);
+  const [flash, setFlash] = useState("");
+  // Registration answers live in page memory only; the password is cleared after submit.
+  const [reg, setReg] = useState({ name: "", phone: "", email: "", password: "", submittedEmail: "" });
+  const sequence = useRef(0);
 
-  async function refresh() {
-    const version = ++revision.current;
+  async function route() {
+    const version = ++sequence.current;
     try {
       const client = createClient();
-      const { data, error: authError } = await client.auth.getUser();
-      if (version !== revision.current) return;
-      if (authError && authError.name !== "AuthSessionMissingError") throw authError;
-      setUser(data.user || null);
-      setMemberships([]);
-      setMembershipLoaded(false);
-      if (data.user) {
-        const result = await client.from("company_members")
-          .select("company_id, role, is_primary, can_manage_products, companies(id, name)")
-          .eq("user_id", data.user.id).eq("active", true);
-        if (version !== revision.current) return;
-        if (result.error) throw result.error;
-        setMemberships(result.data || []);
-        setMembershipLoaded(true);
-        const platform = await client.rpc("is_platform_admin");
-        if (version === revision.current) setPlatformAdmin(!platform.error && platform.data === true);
-      }
+      const { data, error } = await client.auth.getUser();
+      if (version !== sequence.current) return;
+      if (error && error.name !== "AuthSessionMissingError" && ![401, 403].includes(error.status)) throw error;
+      if (!data?.user) { setState({ phase: "guest" }); return; }
+      const user = data.user;
+      // §2: invitation first, then company read (a failed read never shows AUTH.WAIT).
+      if (pendingInvite()) { window.location.replace("/join"); return; }
+      const [members, profile, past] = await Promise.all([
+        client.from("company_members").select("company_id").eq("user_id", user.id).eq("active", true),
+        client.from("account_profiles").select("display_name,whatsapp").eq("user_id", user.id).maybeSingle(),
+        client.from("company_members").select("company_id").eq("user_id", user.id).limit(1)
+      ]);
+      if (members.error) throw members.error;
+      if (version !== sequence.current) return;
+      if (!members.data?.length) { setState({ phase: "wait", user, formerMember: !past.error && !!past.data?.length }); return; }
+      if (!profile.error && !completeCompanyProfile(profile.data)) { window.location.replace(companyProfileSetupUrl(members.data[0].company_id, "/cloud")); return; }
+      window.location.replace("/cloud");
     } catch (err) {
-      if (version === revision.current) setError(`无法读取账号资料：${err.message}`);
-    } finally {
-      if (version === revision.current) setLoading(false);
+      if (version === sequence.current) setState(prev => ({ ...prev, phase: prev.phase === "loading" ? "error" : prev.phase, error: `无法读取账号资料：${err.message}` }));
     }
   }
 
   useEffect(() => {
-    let subscription;
-    let timer;
-    try { setHasInvite(!!pendingInvite()); } catch { /* Auth still works if browser storage is blocked. */ }
-    try {
-      subscription = createClient().auth.onAuthStateChange(() => {
-        clearTimeout(timer);
-        timer = setTimeout(() => { void refresh(); }, 0);
-      }).data.subscription;
-      void refresh();
-    } catch (err) {
-      setError(err.message);
-      setLoading(false);
-    }
-    return () => {
-      ++revision.current;
-      clearTimeout(timer);
-      subscription?.unsubscribe();
-    };
+    try { setInvite(!!pendingInvite()); } catch { /* blocked storage: invitation banner just stays hidden */ }
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("reset") === "1") { setFlash("密码已更新，请用新密码登录。"); window.history.replaceState(null, "", "/account"); }
+    void route();
+    return () => { ++sequence.current; };
   }, []);
 
-  async function perform(task) {
-    if (busy) return;
-    setBusy(true);
-    setError("");
-    setMessage("");
-    try { await task(createClient()); }
-    catch (err) { setError(err.message || "操作失败，请稍后重试。"); }
-    finally { setBusy(false); }
-  }
+  if (state.phase === "loading") return <main className="auth-main"><div className="auth-logo">JOM<br />SALES</div><SkeletonList count={3} height={48} /></main>;
+  if (state.phase === "error") return <main className="auth-main"><div className="auth-logo">JOM<br />SALES</div>
+    <InlineError onRetry={() => { setState({ phase: "loading" }); void route(); }} retryLabel="重新读取">{state.error}</InlineError></main>;
+  if (state.phase === "wait") return <WaitView state={state} onReload={() => { setState({ phase: "loading" }); void route(); }} />;
 
-  function submitAuth(event) {
+  if (view === "verify") return <VerifyView key={reg.resent ? "again" : "first"} email={reg.submittedEmail} resent={reg.resent} onBack={() => setView("register-4")} onLogin={() => setView("login")} />;
+  if (view.startsWith("register")) return <RegisterView step={Number(view.split("-")[1] || 1)} reg={reg} setReg={setReg} go={setView} invite={invite} />;
+  return <LoginView invite={invite} flash={flash} onRegister={() => setView("register-1")} onSignedIn={() => { setState({ phase: "loading" }); void route(); }} />;
+}
+
+function LoginView({ invite, flash, onRegister, onSignedIn }) {
+  const [email, setEmail] = useState(""), [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false), [error, setError] = useState(null), [emailError, setEmailError] = useState(""), [notice, setNotice] = useState(flash);
+  const [forgotLeft, startForgot] = useCountdown(), [resendLeft, startResend] = useCountdown();
+  const emailInput = useRef(null);
+
+  async function submit(event) {
     event.preventDefault();
-    void perform(async client => {
-      const credentials = { email: email.trim(), password };
-      if (mode === "register") { profileFields(displayName, ""); validatePassword(password, password); }
-      const result = mode === "register"
-        ? await client.auth.signUp({ ...credentials, options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`, data: { display_name: displayName.trim() }
-        } })
-        : await client.auth.signInWithPassword(credentials);
+    if (busy) return;
+    if (!email.trim() || !password) { setError({ kind: "credentials", text: "请输入邮箱和密码。" }); return; }
+    setBusy(true); setError(null); setNotice("");
+    try {
+      const result = await createClient().auth.signInWithPassword({ email: email.trim(), password });
       if (result.error) throw result.error;
       setPassword("");
-      if (mode === "register" && !result.data.session) {
-        setMessage("注册申请已提交。请检查邮箱（包括垃圾邮件），验证后回来登录。如邮箱已注册，请直接登录。");
-      } else {
-        window.location.replace(hasInvite ? "/join" : "/");
-      }
-    });
+      if (pendingInvite()) { window.location.replace("/join"); return; }
+      onSignedIn();
+    } catch (err) { setError(loginError(err)); setBusy(false); }
+  }
+  async function forgot() {
+    if (forgotLeft) return;
+    if (!email.trim()) { setEmailError("请先在上面输入邮箱。"); emailInput.current?.focus(); return; }
+    setEmailError(""); setError(null);
+    try {
+      const result = await createClient().auth.resetPasswordForEmail(email.trim(), { redirectTo: `${window.location.origin}/auth/reset` });
+      if (result.error) throw result.error;
+      setNotice("如果这个邮箱已注册，你会收到一封重置邮件。请在这台手机的同一个浏览器里打开链接。"); startForgot();
+    } catch (err) { setError({ kind: "other", text: requestError(err) }); }
+  }
+  async function resend() {
+    if (resendLeft) return;
+    try {
+      const result = await createClient().auth.resend({ type: "signup", email: email.trim(), options: { emailRedirectTo: `${window.location.origin}/auth/callback` } });
+      if (result.error) throw result.error;
+      setNotice("验证邮件已重新发送，请稍候查看。"); startResend();
+    } catch (err) { setError({ kind: "other", text: requestError(err) }); }
   }
 
-  return <main className="page accountPage">
-    <Link href="/">← 返回产品目录</Link>
-    <h1>JomSales 账号</h1>
-    {hasInvite && <p className="notice">你正在接受员工邀请，请使用受邀邮箱注册／登录，无需创建公司。<Link href="/join">返回邀请并确认加入 →</Link></p>}
-    {error && <p className="accountError" role="alert">{error}</p>}
-    {message && <p className="notice" role="status">{message}</p>}
-    {loading ? <p role="status">正在读取账号…</p> : user ? <section className="accountCard">
-      <h2>已登录</h2><p>{user.email}</p>
-      <p><Link href="/settings">个人设置</Link></p>
-      {platformAdmin && <p><Link href="/platform">平台管理后台</Link></p>}
-      {!membershipLoaded ? <><p>公司资料尚未成功读取。</p><button disabled={busy} onClick={() => void refresh()}>重新读取公司资料</button></> : memberships.length > 0 ? <>
-        <h2>所属公司</h2>
-        {memberships.map(member => <div className="notice" key={member.company_id}>
-          <strong>{member.companies?.name || "公司资料暂不可用"}</strong>
-          <p>角色：{memberLabel(member)}</p>
-          <p>产品权限：{canManageProducts(member) ? "可管理（新增、编辑、删除）" : "仅查看与分享"}</p>
-          <p><Link href={`/cloud?company=${member.company_id}`}>进入此公司云端产品 →</Link></p>
-          {member.role === "admin" && <p><Link href={`/team?company=${member.company_id}`}>员工与邀请 →</Link></p>}
-        </div>)}
-        <p><Link href="/cloud">进入公司云端产品 →</Link></p>
-      </> : hasInvite ? <p><Link href="/join">确认公司邀请</Link></p> : <p>等待公司邀请。公司开通请联系 JomSales 负责人；若原本已有公司，请确认访问状态。</p>}
-      <button disabled={busy} onClick={() => void perform(async client => {
-        const result = await client.auth.signOut({ scope: "local" });
-        if (result.error) throw result.error;
-        ++revision.current;
-        setUser(null); setMemberships([]); setPassword(""); setPlatformAdmin(false);
-        window.location.replace("/account");
-      })}>退出此设备的登录</button>
-    </section> : <section className="accountCard">
-      <div className="accountTabs">
-        <button aria-pressed={mode === "login"} disabled={busy} onClick={() => { setMode("login"); setError(""); setMessage(""); }}>登录</button>
-        <button aria-pressed={mode === "register"} disabled={busy} onClick={() => { setMode("register"); setError(""); setMessage(""); }}>注册员工账号</button>
-      </div>
-      <form onSubmit={submitAuth}>
-        {mode === "register" && <><label htmlFor="account-name">显示姓名</label><input id="account-name" autoComplete="name" required maxLength={120} value={displayName} disabled={busy} onChange={e => setDisplayName(e.target.value)} /></>}
-        <label htmlFor="account-email">邮箱</label>
-        <input id="account-email" type="email" autoComplete="email" required maxLength={254} value={email} disabled={busy} onChange={e => setEmail(e.target.value)} />
-        <label htmlFor="account-password">密码{mode === "register" && `（至少 ${PASSWORD_MIN_LENGTH} 个字符）`}</label>
-        <input id="account-password" type="password" autoComplete={mode === "register" ? "new-password" : "current-password"} required minLength={mode === "register" ? PASSWORD_MIN_LENGTH : 1} maxLength={PASSWORD_MAX_LENGTH} value={password} disabled={busy} onChange={e => setPassword(e.target.value)} />
-        <button type="submit" disabled={busy}>{busy ? "处理中…" : mode === "register" ? "注册并验证邮箱" : "登录"}</button>
+  return (
+    <main className="auth-main">
+      {invite && <div className="notice-box" style={{ marginBottom: -24 }}>你正在接受公司邀请，请用受邀邮箱登录或注册。 <Link href="/join" className="text-btn">返回邀请</Link></div>}
+      <div className="auth-logo" aria-label="JomSales">JOM<br />SALES</div>
+      <form className="stack-sm" onSubmit={submit} noValidate>
+        {error && <InlineError>{error.text}{error.kind === "unconfirmed" && <> <button type="button" className="text-btn" disabled={!!resendLeft} onClick={resend}>{resendLeft ? `${resendLeft} 秒后可重发` : "重新发送验证邮件"}</button></>}</InlineError>}
+        {notice && <div className="notice-box" role="status">{notice}</div>}
+        <input id="account-email" ref={emailInput} className="input" type="email" inputMode="email" autoComplete="email" maxLength={254} placeholder="example@gmail.com" aria-label="邮箱"
+          aria-invalid={!!emailError} value={email} disabled={busy} onChange={e => { setEmail(e.target.value); setEmailError(""); }} />
+        {emailError && <span className="field-error">{emailError}</span>}
+        <PasswordInput id="account-password" value={password} onChange={setPassword} label="密码" maxLength={PASSWORD_MAX_LENGTH} disabled={busy} />
+        <button type="submit" className="btn btn-primary btn-block" style={{ marginTop: 8 }} disabled={busy}>{busy ? "处理中…" : "登录"}</button>
+        <button type="button" className="text-btn" style={{ justifySelf: "center" }} disabled={!!forgotLeft} onClick={forgot}>{forgotLeft ? `${forgotLeft} 秒后可再次发送` : "忘记密码？"}</button>
       </form>
-      <button disabled={busy || !email.trim()} onClick={() => void perform(async client => {
-        const result = await client.auth.resetPasswordForEmail(email.trim(), { redirectTo: `${window.location.origin}/auth/reset` });
-        if (result.error) throw result.error;
-        setMessage("如果此邮箱已注册，将收到重置邮件。请在此浏览器打开链接。");
-      })}>忘记密码</button>
-      <button disabled={busy || !email.trim()} onClick={() => void perform(async client => {
-        const result = await client.auth.resend({ type: "signup", email: email.trim(), options: {
-          emailRedirectTo: `${window.location.origin}/auth/callback`
-        } });
-        if (result.error) throw result.error;
-        setMessage("验证邮件请求已提交，请检查邮箱。若未收到，请稍后重试或直接登录。");
-      })}>重新发送验证邮件</button>
-    </section>}
-  </main>;
+      <div style={{ marginTop: "auto", paddingTop: 48 }} className="stack-sm">
+        <button type="button" className="btn btn-secondary btn-block" onClick={onRegister}>注册员工账号</button>
+        <p className="small muted" style={{ textAlign: "center" }}>收到邀请的员工，请用邀请链接加入。</p>
+      </div>
+    </main>
+  );
+}
+
+const STEPS = {
+  1: { title: "你的姓名", sub: "请输入你工作中的名字。" },
+  2: { title: "你的WhatsApp号", sub: "请输入你工作中使用的WhatsApp号码。" },
+  3: { title: "你的邮箱", sub: "请输入你工作中使用的邮箱。" },
+  4: { title: "你的密码", sub: `请创建至少包含 ${PASSWORD_MIN_LENGTH} 个字符的密码。` }
+};
+
+function StepHeader({ onBack, step }) {
+  return (
+    <div className="auth-step-head">
+      <button type="button" className="circle-btn" aria-label="返回" onClick={onBack}><Icon name="arrowLeft" size={20} strokeWidth={2.25} /></button>
+      {step && <span className="small muted" style={{ marginLeft: "auto" }}>{step} / 4</span>}
+    </div>
+  );
+}
+
+function RegisterView({ step, reg, setReg, go, invite }) {
+  const [busy, setBusy] = useState(false), [error, setError] = useState("");
+  const set = (key, value) => { setReg(prev => ({ ...prev, [key]: value })); setError(""); };
+  const input = useRef(null);
+  useEffect(() => { input.current?.focus(); setError(""); }, [step]);
+
+  async function next(event) {
+    event.preventDefault();
+    if (step === 1) {
+      const name = reg.name.trim();
+      if (!name || name.length > 120) { setError("请输入 1–120 个字符的姓名。"); return; }
+      go("register-2");
+    } else if (step === 2) {
+      try { if (!normalizeMalaysiaPhone(reg.phone)) throw new Error("请输入正确的手机号码，例如 12 345 6789。"); go("register-3"); }
+      catch (err) { setError(err.message); }
+    } else if (step === 3) {
+      if (!EMAIL.test(reg.email.trim()) || reg.email.trim().length > 254) { setError("请输入有效的邮箱。"); return; }
+      go("register-4");
+    } else await submit();
+  }
+
+  async function submit() {
+    if (busy) return;
+    if (reg.password.length < PASSWORD_MIN_LENGTH) { setError(`密码至少需要 ${PASSWORD_MIN_LENGTH} 个字符。`); return; }
+    if (reg.password.length > PASSWORD_MAX_LENGTH) { setError(`密码最多 ${PASSWORD_MAX_LENGTH} 个字符。`); return; }
+    const email = reg.email.trim();
+    // Back from AUTH.VERIFY with the same email: never call signUp twice.
+    if (reg.submittedEmail && reg.submittedEmail.toLowerCase() === email.toLowerCase()) {
+      setReg(prev => ({ ...prev, password: "", resent: true })); go("verify"); return;
+    }
+    let whatsapp, name = reg.name.trim();
+    try { whatsapp = normalizeMalaysiaPhone(reg.phone); } catch (err) { setError(err.message); go("register-2"); return; }
+    if (!name || name.length > 120) { go("register-1"); return; }
+    setBusy(true); setError("");
+    try {
+      const result = await createClient().auth.signUp({ email, password: reg.password, options: {
+        emailRedirectTo: `${window.location.origin}/auth/callback`, data: { display_name: name, whatsapp } } });
+      if (result.error) throw result.error;
+      setReg(prev => ({ ...prev, password: "", submittedEmail: email, resent: false }));
+      if (result.data.session) { console.warn("Email confirmation appears disabled in Supabase Auth."); window.location.replace(pendingInvite() ? "/join" : "/account"); return; }
+      go("verify");
+    } catch (err) {
+      setReg(prev => ({ ...prev, password: "" }));
+      setError(/password/i.test(err.message || "") ? `密码至少需要 ${PASSWORD_MIN_LENGTH} 个字符。` : (err.status === 429 ? "尝试次数过多，请稍后再试。" : "注册未完成，请检查网络后重试。"));
+    } finally { setBusy(false); }
+  }
+
+  const copy = STEPS[step];
+  return (
+    <main className="auth-main">
+      <StepHeader step={step} onBack={() => go(step === 1 ? "login" : `register-${step - 1}`)} />
+      <form className="stack" onSubmit={next} noValidate>
+        <div><h1 className="auth-title">{copy.title}</h1><p className="auth-sub">{copy.sub}</p></div>
+        {invite && step === 1 && <div className="notice-box">请使用收到邀请的邮箱注册。注册时不能创建公司。</div>}
+        {step === 1 && <input ref={input} className="input" autoComplete="name" maxLength={120} placeholder="名字" aria-label="姓名" aria-invalid={!!error} value={reg.name} onChange={e => set("name", e.target.value)} />}
+        {step === 2 && <><div className="input-group" aria-invalid={!!error}><span className="prefix">+60</span>
+          <input ref={input} className="input" type="tel" inputMode="tel" autoComplete="tel-national" maxLength={20} placeholder="12 345 6789" aria-label="WhatsApp 号码" value={reg.phone} onChange={e => set("phone", e.target.value)} /></div>
+          <span className="field-hint">顾客通过你分享的链接联系你时会用到这个号码。之后可在「我的」里更改。</span></>}
+        {step === 3 && <input ref={input} className="input" type="email" inputMode="email" autoComplete="email" maxLength={254} placeholder="example@gmail.com" aria-label="邮箱" aria-invalid={!!error} value={reg.email} onChange={e => set("email", e.target.value)} />}
+        {step === 4 && <><PasswordInput value={reg.password} onChange={value => set("password", value)} autoComplete="new-password" label="密码" invalid={!!error} disabled={busy} />
+          <span className="field-hint">建议使用更长、且不与其他网站重复的密码。</span></>}
+        {error && <span className="field-error" role="alert">{error}</span>}
+        <button type="submit" className="btn btn-primary btn-block" disabled={busy}>{step === 4 ? (busy ? "处理中…" : "注册并验证邮箱") : "下一步"}</button>
+      </form>
+    </main>
+  );
+}
+
+function VerifyView({ email, resent, onBack, onLogin }) {
+  const [left, start] = useCountdown(), [error, setError] = useState("");
+  const [notice, setNotice] = useState(resent ? "验证邮件已经发送，请检查邮箱，或点击重新发送。" : "");
+  async function resend() {
+    if (left) return;
+    setError("");
+    try {
+      const result = await createClient().auth.resend({ type: "signup", email, options: { emailRedirectTo: `${window.location.origin}/auth/callback` } });
+      if (result.error) throw result.error;
+      setNotice("验证邮件已重新发送，请稍候查看。"); start();
+    } catch (err) { setError(requestError(err)); }
+  }
+  return (
+    <main className="auth-main">
+      <StepHeader onBack={onBack} />
+      <div className="stack">
+        <div><h1 className="auth-title">验证邮箱</h1>
+          <p className="auth-sub">注册申请已提交。请检查 <strong>{email}</strong> 的收件箱，包括垃圾邮件，验证后回来登录。</p>
+          <p className="auth-sub">如果这个邮箱之前已经注册过，请直接登录。</p></div>
+        {notice && <div className="notice-box" role="status">{notice}</div>}
+        <InlineError>{error}</InlineError>
+        <div className="btn-row">
+          <button type="button" className="btn btn-secondary" onClick={onLogin}>返回登录页面</button>
+          <button type="button" className="btn btn-primary" disabled={!!left} onClick={resend}>{left ? `${left} 秒后可重发` : "重新发送邮件"}</button>
+        </div>
+      </div>
+    </main>
+  );
+}
+
+function WaitView({ state, onReload }) {
+  const toast = useToast();
+  const [busy, setBusy] = useState(false);
+  async function logout() {
+    setBusy(true);
+    try { const result = await createClient().auth.signOut({ scope: "local" }); if (result.error) throw result.error; window.location.replace("/account"); }
+    catch (err) { toast(`退出失败：${err.message}`); setBusy(false); }
+  }
+  return (
+    <main className="auth-main">
+      <div className="auth-logo" style={{ margin: "40px auto 32px" }}>JOM<br />SALES</div>
+      <div className="stack">
+        <div className="card row"><Icon name="userCircle" size={28} /><span className="grow ellipsis">{state.user.email}</span></div>
+        <div><h1 className="auth-title">等待公司邀请</h1>
+          <p className="auth-sub">{state.formerMember ? "你对原来公司的访问已停用。如有疑问，请联系公司管理员。" : "你的账号已创建。请让公司管理员给你发送邀请链接，打开链接即可加入公司。"}</p></div>
+        <button type="button" className="btn btn-primary btn-block" disabled={busy} onClick={onReload}><Icon name="refresh" size={18} />重新读取</button>
+        <Link href="/settings" className="btn btn-secondary btn-block">个人资料</Link>
+        <button type="button" className="btn btn-danger btn-block" disabled={busy} onClick={logout}>退出登录</button>
+      </div>
+    </main>
+  );
 }

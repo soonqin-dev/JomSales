@@ -6,7 +6,7 @@ import { createClient } from "../../../lib/supabase/client";
 import { readBrand, saveBrand } from "../../../lib/supabase/workspace";
 import { prepareUploadImage } from "../../images";
 import { useMember } from "../../member-context";
-import { EmptyState, InlineError, MoreMenu, SkeletonList, TopBar, useConfirm, useToast } from "../../ui";
+import { EmptyState, InlineError, MoreMenu, SkeletonList, TopBar, useConfirm, useLeaveGuard, useToast } from "../../ui";
 import QuoteDefaults from "./QuoteDefaults";
 
 export default function Brand() {
@@ -60,11 +60,7 @@ function BrandEditor({ onDirty }) {
     finally { if (version === sequence.current) { pending.current = false; setBusy(false); } }
   }
   useEffect(() => { void reload(false); return () => { ++sequence.current; }; }, []);
-  useEffect(() => {
-    const leave = e => { if (dirty || busy) { e.preventDefault(); e.returnValue = ""; } };
-    window.addEventListener("beforeunload", leave);
-    return () => window.removeEventListener("beforeunload", leave);
-  }, [dirty, busy]);
+  useLeaveGuard(dirty, { message: "公司品牌的修改还没保存。" });
 
   function edit(value) { setDraft(prev => ({ ...prev, ...value })); setDirty(true); }
   async function upload(file) {

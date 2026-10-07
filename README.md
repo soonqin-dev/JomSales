@@ -31,7 +31,7 @@ rather than creating another company.
 | Path | Purpose | Access |
 | --- | --- | --- |
 | `/` | Account or company workspace redirect | Verified server Auth |
-| `/account` | Register/login, resend email, create company, membership, logout | Public login screen |
+| `/account` | Login, 4-step registration, email verification, waiting for invitation | Public login screen |
 | `/auth/callback` | Finish email confirmation | Public callback |
 | `/join` | Email-bound employee invitation | Public entry, authenticated acceptance |
 | `/cloud` | Product catalog (CAT), detail sheet, share cards, product CRUD | Active company member |
@@ -53,6 +53,26 @@ embedded user. Cookie refresh is forwarded to SSR and browser, including redirec
 Protected responses are private/no-store. Supabase grants/RLS/scoped RPCs remain
 the authoritative permissions. Login cookies and invitation sessionStorage are
 authentication state, not business-data storage.
+
+## Rollout: Figma redesign + sign-up WhatsApp (redesign/figma-ui)
+
+The redesign changes UI only, plus ONE new migration. Before deploying it:
+
+1. Run `supabase/migrations/202610070002_register_whatsapp.sql` ONCE in Supabase
+   SQL Editor as postgres. It only replaces the sign-up seed trigger so new
+   accounts keep the WhatsApp entered in registration step 2; existing profiles
+   and numbers are not touched. Do NOT rerun earlier migrations.
+2. Run `supabase/tests/register_whatsapp.sql`; it must print PASS and rolls back.
+3. Supabase Auth → URL Configuration → Redirect URLs must include BOTH
+   `/auth/callback` and `/auth/reset` for the production origin
+   (`https://jomsales.vercel.app/...`) and `http://localhost:3000/...`.
+   Site URL should be `https://jomsales.vercel.app`.
+4. Optional: paste the Chinese templates from `docs/auth-email-templates.md` into
+   Authentication → Email Templates. Keep email confirmation on and the minimum
+   password length at 6 (`docs/password-minimum.md`).
+
+Without step 1 registration still works, but the WhatsApp number from sign-up is
+dropped and the user is asked for it again before entering a company.
 
 ## Rollout for the current installation
 
@@ -171,8 +191,15 @@ with Auth/Storage schema stubs, including company isolation, own/admin quotation
 disabled/anonymous access, lifecycle RPC revisions, 15-day expiry/purge and
 historical Logo retention. Physical purge is tested ONLY in the isolated DB.
 
-Optional browser regression: install Playwright separately or set
-`SALESGO_PLAYWRIGHT_MODULE` to an existing module, then run:
+Redesign browser regression (current UI): install Playwright separately or set
+`SALESGO_PLAYWRIGHT_MODULE` (e.g. a `playwright-core` install) and optionally
+`SALESGO_BROWSER_CHANNEL=chrome`, then run `node scripts/test-redesign-browser.cjs`.
+It builds into its own `.next-launchpad-redesign-*` folder against the local API
+double and checks login, the five-tab navigation, quick add merging, the quote
+surviving page switches, download autosave/reset, quote reopening, hidden CRUD for
+sales, admin pages, and that no native browser dialog is ever shown.
+
+Legacy browser regression (pre-redesign UI text; superseded by the script above):
 
 ```sh
 node scripts/test-workspace-browser.cjs
