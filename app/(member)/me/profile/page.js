@@ -1,3 +1,3 @@
-import { redirect } from "next/navigation";
-// Interim: PRO is served by /settings until the dedicated screen lands (pages-spec §4).
-export default function Page() { redirect("/settings"); }
+import { requireUser } from "../../../../lib/supabase/server";
+import Profile from "./Profile";
+export default async function Page() { await requireUser(); return <Profile />; }

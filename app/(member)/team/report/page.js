@@ -1,3 +1,3 @@
-import { redirect } from "next/navigation";
-// Interim: RPT still lives inside /team until it is split out (pages-spec §6).
-export default function Page() { redirect("/team"); }
+import { requireUser } from "../../../../lib/supabase/server";
+import SalesReport from "../SalesReport";
+export default async function Page() { await requireUser(); return <SalesReport />; }

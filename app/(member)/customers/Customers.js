@@ -1,34 +1,144 @@
 "use client";
-import Link from "next/link";
-import { useEffect,useRef,useState } from "react";
-import useCompanyScope from "../../use-company-scope";
+// CUS｜客户通讯录 + CUE｜新增／编辑客户 — docs/pages-spec.md §1.
+import { useEffect, useRef, useState } from "react";
 import { createClient } from "../../../lib/supabase/client";
-import { listCustomers,saveCustomer,setCustomerActive } from "../../../lib/supabase/customers";
-import EmployeeFilter from '../../EmployeeFilter';
-function List({context}) {
-  const [rows,setRows]=useState([]),[search,setSearch]=useState(""),[inactive,setInactive]=useState(false),[offset,setOffset]=useState(0),[total,setTotal]=useState(0),[loading,setLoading]=useState(true),[busy,setBusy]=useState(false),[error,setError]=useState(""),[message,setMessage]=useState("");
-  const [draft,setDraft]=useState(null),[previous,setPrevious]=useState(null),[dirty,setDirty]=useState(false);
-  const [owner,setOwner]=useState(null);
-  const sequence=useRef(0),working=useRef(false);
-  async function load(){const version=++sequence.current;setLoading(true);setError("");setRows([]);try{const data=await listCustomers(createClient(),context.companyId,search,inactive,offset,owner);if(version===sequence.current){setRows(data.items);setTotal(Number(data.total));}}catch(err){if(version===sequence.current)setError(err.message);}finally{if(version===sequence.current)setLoading(false);}}
-  useEffect(()=>{const timer=setTimeout(load,250);return()=>{++sequence.current;clearTimeout(timer);};},[search,inactive,offset,owner]);
-  useEffect(()=>{const leave=e=>{if(dirty||busy){e.preventDefault();e.returnValue="";}};const link=e=>{if((dirty||busy)&&e.target.closest?.("a[href]")&&(busy||!window.confirm("客户资料尚未保存，确认离开？"))){e.preventDefault();e.stopPropagation();}};
-    window.addEventListener("beforeunload",leave);document.addEventListener("click",link,true);return()=>{window.removeEventListener("beforeunload",leave);document.removeEventListener("click",link,true);};},[dirty,busy]);
-  function edit(row=null){if(working.current||(dirty&&!window.confirm("放弃未保存的客户修改？")))return;setPrevious(row);setDraft(row||{id:crypto.randomUUID(),name:"",company:"",phone:"",email:"",address:""});setDirty(false);setError("");}
-  async function run(task){if(working.current)return;working.current=true;setBusy(true);setError("");try{await task();await load();}catch(err){setError(err.message);}finally{working.current=false;setBusy(false);}}
-  return <><Link href={`/cloud?company=${context.companyId}`}>← 产品目录</Link><h1>客户通讯录</h1><p>{context.name} · {context.role==="admin"?"可查看全公司客户；只能修改自己建立的客户。":"只有你建立的客户会显示。"}</p>
-    {error&&<p role="alert" className="accountError">{error}</p>}{message&&<p role="status">{message}</p>}
-    <button disabled={busy} onClick={()=>edit()}>新增客户</button>
-    {draft&&<form className="accountCard" onSubmit={e=>{e.preventDefault();void run(async()=>{await saveCustomer(createClient(),context,draft,previous);setDraft(null);setPrevious(null);setDirty(false);setMessage("客户资料已保存，旧报价不会改变。");});}}><fieldset disabled={busy}>
-      {[['name','客户姓名',120],['company','客户公司',120],['phone','客户电话',40],['email','客户邮箱',254],['address','客户地址',1000]].map(([key,label,max])=><label key={key}>{label}<input required={key==='name'} type={key==='email'?'email':key==='phone'?'tel':'text'} maxLength={max} value={draft[key]} onChange={e=>{setDraft({...draft,[key]:e.target.value});setDirty(true);}} /></label>)}
-      <button>保存客户</button><button type="button" onClick={()=>{if(!dirty||window.confirm("放弃客户修改？")){setDraft(null);setDirty(false);}}}>取消</button>
-    </fieldset></form>}
-    <div className="accountCard"><label>查询客户<input maxLength={120} value={search} disabled={busy} onChange={e=>{setSearch(e.target.value);setOffset(0);}} /></label><label>显示范围<select value={inactive?'all':'active'} disabled={busy} onChange={e=>{setInactive(e.target.value==='all');setOffset(0);}}><option value="active">有效客户</option><option value="all">包含停用客户</option></select></label>
-      {context.role==='admin'&&<EmployeeFilter companyId={context.companyId} label="筛选建立者" value={owner} disabled={busy} onChange={value=>{if(value===owner)return;++sequence.current;setRows([]);setLoading(true);setOwner(value);setOffset(0);}}/>}
-      {loading&&<p role="status">正在读取客户…</p>}{!loading&&!rows.length&&<p>没有符合条件的客户。</p>}
-      {rows.map(row=><article className="teamRow" key={row.id}><div><strong>{row.name}</strong><p>{row.company} · {row.phone} · {row.email}</p><p>{row.address}</p><p>所属员工：{row.owner_name || row.owner_email || '姓名待补填'}{context.role==='admin'&&row.owner_email&&row.owner_name!==row.owner_email&&` · ${row.owner_email}`}</p><p>{row.active?'有效':'已停用'}{row.created_by===context.userId?' · 我建立的':' · 其他员工建立的（只读）'}</p></div>
-        {row.created_by===context.userId&&<div className="cloudButtons"><button disabled={busy} onClick={()=>edit(row)}>编辑客户</button><button disabled={busy} onClick={()=>{if(window.confirm(`${row.active?'停用':'恢复'} ${row.name}？历史报价不受影响。`))void run(async()=>{await setCustomerActive(createClient(),context,row,!row.active);setMessage("客户状态已更新。");});}}>{row.active?'停用客户':'恢复客户'}</button></div>}
-      </article>)}<div className="cloudButtons"><button disabled={busy||loading||!offset} onClick={()=>setOffset(value=>Math.max(0,value-50))}>上一页</button><span>共 {total} 位</span><button disabled={busy||loading||offset+50>=total} onClick={()=>setOffset(value=>value+50)}>下一页</button></div>
-    </div></>;
+import { listCustomers, saveCustomer, setCustomerActive } from "../../../lib/supabase/customers";
+import { useMember } from "../../member-context";
+import { EmptyState, InlineError, MoreMenu, Pager, SearchBox, Sheet, SkeletonList, TopBar, useConfirm, useToast } from "../../ui";
+import EmployeeFilter from "../../EmployeeFilter";
+import Icon from "../../icons";
+
+const PAGE = 50;
+const FIELDS = [["name", "姓名*", 120, "text"], ["phone", "电话", 40, "tel"], ["company", "公司", 120, "text"], ["email", "邮箱", 254, "email"], ["address", "地址", 1000, "textarea"]];
+
+export default function Customers() {
+  const member = useMember(), confirm = useConfirm(), toast = useToast();
+  const [rows, setRows] = useState([]), [total, setTotal] = useState(0), [offset, setOffset] = useState(0);
+  const [search, setSearch] = useState(""), [inactive, setInactive] = useState(false), [owner, setOwner] = useState(null);
+  const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState(""), [attempt, setAttempt] = useState(0);
+  const [open, setOpen] = useState(null), [editor, setEditor] = useState(null), [filters, setFilters] = useState(false);
+  const sequence = useRef(0), working = useRef(false);
+  const admin = member.role === "admin";
+
+  useEffect(() => {
+    const version = ++sequence.current;
+    setLoading(true); setError("");
+    const timer = setTimeout(async () => {
+      try {
+        const data = await listCustomers(createClient(), member.companyId, search, inactive, offset, owner);
+        if (version === sequence.current) { setRows(data.items); setTotal(Number(data.total)); }
+      } catch (err) { if (version === sequence.current) setError(`客户读取失败：${err.message}`); }
+      finally { if (version === sequence.current) setLoading(false); }
+    }, 250);
+    return () => { ++sequence.current; clearTimeout(timer); };
+  }, [search, inactive, offset, owner, attempt]);
+
+  // CPK「去新增客户」arrives with ?new=1.
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("new") === "1") {
+      setEditor({ row: null });
+      url.searchParams.delete("new"); window.history.replaceState(window.history.state, "", url.pathname + url.search);
+    }
+  }, []);
+
+  async function toggleActive(row) {
+    if (working.current) return;
+    if (!(await confirm({ title: `${row.active ? "停用" : "恢复"} ${row.name}？`, message: "历史报价不受影响。", confirmLabel: row.active ? "停用客户" : "恢复客户", danger: row.active }))) return;
+    working.current = true; setBusy(true);
+    try { await setCustomerActive(createClient(), member, row, !row.active); toast(row.active ? "客户已停用" : "客户已恢复"); setAttempt(n => n + 1); }
+    catch (err) { toast(err.message); }
+    finally { working.current = false; setBusy(false); }
+  }
+
+  const filtered = inactive || owner;
+
+  return (
+    <main className="app-main">
+      <TopBar title="客户" subtitle={loading ? " " : `共 ${total} 位${admin ? " · 全公司" : ""}`} actions={
+        <button type="button" className="circle-btn" aria-label="新增客户" onClick={() => setEditor({ row: null })}><Icon name="plus" size={22} strokeWidth={2.25} /></button>} />
+      <div className="stack">
+        <div className="search-row">
+          <SearchBox value={search} onChange={value => { setSearch(value); setOffset(0); }} placeholder="搜索姓名、公司、电话" label="搜索客户" />
+          <button type="button" className="filter-btn" onClick={() => setFilters(true)}><Icon name="filter" size={20} />筛选{filtered && <span className="dot" />}</button>
+        </div>
+        {error && <InlineError onRetry={() => setAttempt(n => n + 1)}>{error}</InlineError>}
+        {loading ? <SkeletonList count={5} height={64} /> : !rows.length ? (
+          search || filtered ? <EmptyState title="没有符合的客户" />
+            : <EmptyState icon="phone" title="还没有客户" action={<button type="button" className="btn btn-primary btn-sm" onClick={() => setEditor({ row: null })}>新增客户</button>} />
+        ) : rows.map(row => {
+          const mine = row.created_by === member.userId, expanded = open === row.id;
+          return (
+            <article key={row.id} className={`card data-card${row.active ? "" : " muted-card"}`}>
+              <div className="row-between" style={{ alignItems: "flex-start" }}>
+                <button type="button" className="grow" style={{ border: 0, background: "none", padding: 0, textAlign: "left" }} aria-expanded={expanded} onClick={() => setOpen(expanded ? null : row.id)}>
+                  <span className="title-line"><strong>{row.name}</strong>{!row.active && <span className="chip">已停用</span>}{!mine && <span className="chip">只读</span>}</span>
+                  <span className="meta" style={{ display: "block" }}>{[row.company, row.phone].filter(Boolean).join(" · ") || "—"}</span>
+                </button>
+                {mine && <MoreMenu label={`${row.name} 的更多操作`} disabled={busy} items={[
+                  { label: "编辑客户", icon: "sliders", onSelect: () => setEditor({ row }) },
+                  { label: row.active ? "停用客户" : "恢复客户", icon: row.active ? "lock" : "refresh", danger: row.active, onSelect: () => void toggleActive(row) }
+                ]} />}
+              </div>
+              {expanded && <div className="stack-sm" style={{ paddingTop: 6 }}>
+                {row.phone && <a className="text-btn" href={`tel:${row.phone}`}><Icon name="phone" size={16} />{row.phone}</a>}
+                {row.email && <a className="text-btn" href={`mailto:${row.email}`}><Icon name="send" size={16} />{row.email}</a>}
+                {row.address && <p className="meta preserveLines">{row.address}</p>}
+                <p className="meta small">建立者：{row.owner_name || row.owner_email || "—"}{mine ? "（我）" : ""} · {row.active ? "有效" : "已停用"}</p>
+              </div>}
+            </article>
+          );
+        })}
+        <Pager page={Math.floor(offset / PAGE)} hasMore={offset + PAGE < total} disabled={loading || busy}
+          onPrev={() => setOffset(v => Math.max(0, v - PAGE))} onNext={() => setOffset(v => v + PAGE)} />
+      </div>
+
+      {filters && <Sheet title="筛选客户" bottom onClose={() => setFilters(false)} footer={<button type="button" className="btn btn-primary btn-block" onClick={() => setFilters(false)}>完成</button>}>
+        <div className="stack-sm"><span className="field-label">显示范围</span>
+          <div className="segmented" role="group" aria-label="显示范围">
+            <button type="button" aria-pressed={!inactive} onClick={() => { setInactive(false); setOffset(0); }}>有效客户</button>
+            <button type="button" aria-pressed={inactive} onClick={() => { setInactive(true); setOffset(0); }}>包含停用</button>
+          </div></div>
+        {admin && <EmployeeFilter companyId={member.companyId} label="建立者" value={owner} onChange={value => { setOwner(value); setOffset(0); }} />}
+      </Sheet>}
+      {editor && <CustomerEditor row={editor.row} onClose={() => setEditor(null)} onSaved={() => { setEditor(null); toast("客户已保存，旧报价不会改变"); setAttempt(n => n + 1); }} />}
+    </main>
+  );
 }
-export default function Customers(){const {context,error}=useCompanyScope();return <main className="page accountPage">{error&&<p role="alert">{error}</p>}{context?<List key={`${context.userId}:${context.companyId}:${context.role}`} context={context}/>:<p>正在确认公司权限… <Link href="/account">账号</Link></p>}</main>;}
+
+function CustomerEditor({ row, onClose, onSaved }) {
+  const member = useMember(), confirm = useConfirm();
+  const initial = useRef(row ? { ...row } : { id: crypto.randomUUID(), name: "", company: "", phone: "", email: "", address: "" });
+  const [draft, setDraft] = useState(initial.current), [saving, setSaving] = useState(false), [error, setError] = useState(""), [nameError, setNameError] = useState("");
+  const dirty = FIELDS.some(([key]) => (draft[key] || "") !== (initial.current[key] || ""));
+
+  async function close() {
+    if (saving) return;
+    if (dirty && !(await confirm({ title: "放弃修改？", message: "客户资料还没保存。", cancelLabel: "继续编辑", confirmLabel: "放弃", danger: true }))) return;
+    onClose();
+  }
+  async function save(event) {
+    event.preventDefault();
+    if (!draft.name.trim()) { setNameError("请填写客户姓名"); return; }
+    setSaving(true); setError("");
+    try { await saveCustomer(createClient(), member, draft, row); onSaved(); }
+    catch (err) { setError(err.message); }
+    finally { setSaving(false); }
+  }
+
+  return (
+    <Sheet title={row ? "编辑客户" : "新增客户"} subtitle="只有你建立的客户可以修改" onClose={close} footer={<>
+      <InlineError>{error}</InlineError>
+      <button type="submit" form="cue-form" className="btn btn-primary btn-block" disabled={saving}>{saving ? "保存中…" : "保存客户"}</button></>}>
+      <form id="cue-form" className="stack" onSubmit={save} noValidate>
+        {FIELDS.map(([key, label, max, type]) => <label key={key} className="field"><span className="field-label">{label}</span>
+          {type === "textarea"
+            ? <textarea className="input" rows={3} maxLength={max} value={draft[key] || ""} onChange={e => setDraft({ ...draft, [key]: e.target.value })} />
+            : <input className="input" type={type} maxLength={max} value={draft[key] || ""} aria-invalid={key === "name" && !!nameError}
+              onChange={e => { setDraft({ ...draft, [key]: e.target.value }); if (key === "name") setNameError(""); }} />}
+          {key === "name" && nameError && <span className="field-error">{nameError}</span>}
+        </label>)}
+      </form>
+    </Sheet>
+  );
+}

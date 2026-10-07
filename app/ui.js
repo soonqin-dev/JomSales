@@ -129,6 +129,19 @@ export function SearchBox({ value, onChange, placeholder = "搜索", label, disa
   );
 }
 
+/* ---------- Password with show/hide (Figma Log In) ---------- */
+export function PasswordInput({ id, value, onChange, placeholder = "密码", autoComplete = "current-password", disabled, minLength, maxLength = 128, invalid, label }) {
+  const [shown, setShown] = useState(false);
+  return (
+    <div className="input-group" aria-invalid={invalid || undefined}>
+      <input id={id} className="input" type={shown ? "text" : "password"} value={value} placeholder={placeholder} aria-label={label}
+        autoComplete={autoComplete} disabled={disabled} minLength={minLength} maxLength={maxLength} onChange={event => onChange(event.target.value)} />
+      <button type="button" className="icon-btn" aria-label={shown ? "隐藏密码" : "显示密码"} aria-pressed={shown} onClick={() => setShown(v => !v)}>
+        <Icon name={shown ? "eye" : "eyeOff"} size={20} /></button>
+    </div>
+  );
+}
+
 /* ---------- G.PAGE_* ---------- */
 export function Pager({ page, hasMore, onPrev, onNext, disabled, label }) {
   if (!page && !hasMore) return null;
@@ -171,6 +184,31 @@ export function StatusPill({ status }) {
 export function initials(name, email) {
   const text = String(name || email || "?").trim();
   return Array.from(text)[0] || "?";
+}
+
+/* ---------- D.DISCARD on leave: reload/close and in-app links ---------- */
+export function useLeaveGuard(active, { title = "离开这个页面？", message = "还有没保存的修改，离开后会丢失。", blocked = false } = {}) {
+  const confirm = useConfirm(), router = useRouter();
+  const state = useRef({ active, blocked, title, message });
+  state.current = { active, blocked, title, message };
+  useEffect(() => {
+    const leave = event => { if (state.current.active || state.current.blocked) { event.preventDefault(); event.returnValue = ""; } };
+    const click = event => {
+      const anchor = event.target.closest?.("a[href]");
+      if (!anchor || event.defaultPrevented || anchor.hasAttribute("download") || anchor.target === "_blank" || event.metaKey || event.ctrlKey) return;
+      if (!state.current.active && !state.current.blocked) return;
+      const url = new URL(anchor.href, window.location.href);
+      if (url.origin !== window.location.origin) return;
+      event.preventDefault(); event.stopPropagation();
+      // Work in progress (an import batch, a save) cannot be abandoned mid-request.
+      if (state.current.blocked) return;
+      void confirm({ title: state.current.title, message: state.current.message, cancelLabel: "留在这里", confirmLabel: "离开", danger: true })
+        .then(ok => { if (ok) { state.current.active = false; router.push(url.pathname + url.search); } });
+    };
+    window.addEventListener("beforeunload", leave);
+    document.addEventListener("click", click, true);
+    return () => { window.removeEventListener("beforeunload", leave); document.removeEventListener("click", click, true); };
+  }, [confirm, router]);
 }
 
 /* ---------- G.CONFIRM + G.TOAST providers ---------- */

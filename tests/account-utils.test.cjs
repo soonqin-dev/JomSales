@@ -4,13 +4,21 @@ const vm = require("node:vm");
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 const context = vm.createContext({});
-vm.runInContext(readFileSync(join(__dirname,"../lib/account-utils.js"),"utf8").replace(/export /g,"")+";globalThis.api={profileFields,validatePassword,memberLabel,nullableLimit}",context);
+vm.runInContext(readFileSync(join(__dirname,"../lib/account-utils.js"),"utf8").replace(/export /g,"")+";globalThis.api={profileFields,validatePassword,memberLabel,nullableLimit,normalizeMalaysiaPhone,malaysiaLocalPart}",context);
 const api=context.api;
 test("profile name and international phone validation",()=>{
   assert.equal(api.profileFields("  张三  ","+60 12-345 6789").displayName,"张三");
   assert.equal(api.profileFields("Ryan","+60 12-345 6789").whatsapp,"+60123456789");
   assert.equal(api.profileFields("Ryan","").whatsapp,"");
   for(const args of [["", ""],["x".repeat(121),""],["Ryan","0123456789"],["Ryan","+0123456789"]])assert.throws(()=>api.profileFields(...args));
+});
+test("fixed +60 WhatsApp entry normalizes every common Malaysian format",()=>{
+  for(const input of ["012 345 6789","12 345 6789","+60 12 345 6789","60123456789","(012) 345-6789","+600123456789"])assert.equal(api.normalizeMalaysiaPhone(input),"+60123456789");
+  assert.equal(api.normalizeMalaysiaPhone("  "),"");
+  for(const input of ["12ab","123","+60","1".repeat(15)])assert.throws(()=>api.normalizeMalaysiaPhone(input),/12 345 6789/);
+  assert.equal(api.malaysiaLocalPart("+60123456789"),"123456789");
+  assert.equal(api.malaysiaLocalPart(""),"");
+  assert.equal(api.malaysiaLocalPart("+6591234567"),null);
 });
 test("password confirmation and nullable plan limits",()=>{
   assert.equal(api.validatePassword("secure-password","secure-password"),"secure-password");
