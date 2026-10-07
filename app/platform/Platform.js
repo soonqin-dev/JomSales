@@ -7,6 +7,7 @@ import { newInviteToken } from "../../lib/supabase/invitations";
 import { nullableLimit, memberLabel } from "../../lib/account-utils";
 import { EmptyState, InlineError, MoreMenu, Pager, Sheet, SkeletonList, useConfirm, useToast } from "../ui";
 import Icon from "../icons";
+import { AccountsTab, DeleteCompanySheet, TrashTab } from "./Deletion";
 
 const states = { trial: ["试用", "pill-warn"], active: ["正常", "pill-green"], expired: ["到期", "pill-muted"], suspended: ["停用", "pill-danger"] };
 const dateInput = date => date ? new Date(new Date(date).getTime() - new Date(date).getTimezoneOffset() * 60000).toISOString().slice(0, 16) : "";
@@ -19,6 +20,7 @@ export default function Platform() {
   const [creating, setCreating] = useState(false), [name, setName] = useState(""), [email, setEmail] = useState(""), [invite, setInvite] = useState(null);
   const [selected, setSelected] = useState(null), [draft, setDraft] = useState(null), [members, setMembers] = useState([]), [audit, setAudit] = useState([]);
   const [primaryEmail, setPrimaryEmail] = useState("");
+  const [tab, setTab] = useState("companies"), [deleting, setDeleting] = useState(null);
   const sequence = useRef(0), working = useRef(false), identity = useRef(null), pending = useRef(null);
   const fail = err => { if (err) throw err; };
   async function rpc(client, method, args) { const result = await client.rpc(method, args); fail(result.error); return result.data; }
@@ -148,6 +150,13 @@ export default function Platform() {
                 <Link href="/settings" className="btn btn-primary btn-sm">前往双重验证</Link></div>
             </div>
           ) : <>
+            <div className="segmented" role="tablist" aria-label="平台分区">
+              {[["companies", "公司"], ["accounts", "账号"], ["trash", "回收箱"]].map(([key, label]) =>
+                <button key={key} type="button" role="tab" aria-selected={tab === key} aria-pressed={tab === key} onClick={() => { setTab(key); if (key === "companies") void load(offset); }}>{label}</button>)}
+            </div>
+            {tab === "accounts" && <AccountsTab />}
+            {tab === "trash" && <TrashTab />}
+            {tab === "companies" && <>
             <form className="search-row" onSubmit={e => { e.preventDefault(); void load(0); }}>
               <div className="searchbox"><Icon name="search" size={20} /><input value={search} maxLength={120} placeholder="搜索公司" aria-label="搜索公司" disabled={busy} onChange={e => setSearch(e.target.value)} /></div>
               <button type="submit" className="btn btn-secondary btn-sm" disabled={busy || loading}>查询</button>
@@ -167,9 +176,12 @@ export default function Platform() {
               );
             })}
             <Pager page={offset / 50} hasMore={rows.length >= 50} disabled={busy || loading} onPrev={() => void load(Math.max(0, offset - 50))} onNext={() => void load(offset + 50)} />
+            </>}
           </>}
         </div>
       </main>
+
+      {deleting && <DeleteCompanySheet company={deleting} onClose={() => setDeleting(null)} onDone={() => { setDeleting(null); void load(offset); }} />}
 
       {creating && <Sheet title="开通公司" subtitle="开通后把管理员邀请链接发给对方" onClose={() => setCreating(false)} footer={invite
         ? <button type="button" className="btn btn-primary btn-block" onClick={() => setCreating(false)}>完成</button>
@@ -227,6 +239,12 @@ export default function Platform() {
             {!audit.length && <li>暂无记录</li>}</ul>
         </details>
         <InlineError>{error}</InlineError>
+        <section className="stack-sm" style={{ borderTop: "1px solid var(--line)", paddingTop: 16 }}>
+          <h3 className="section-title" style={{ color: "var(--danger)" }}>删除公司</h3>
+          <p className="field-hint">先下载备份，再移入回收箱。30 天内可以恢复。</p>
+          <button type="button" className="btn btn-danger btn-sm" disabled={busy} onClick={() => { const company = selected; setSelected(null); setDraft(null); setInvite(null); setDeleting(company); }}>
+            <Icon name="trash" size={16} />删除这家公司</button>
+        </section>
       </Sheet>}
     </>
   );

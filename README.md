@@ -74,6 +74,26 @@ The redesign changes UI only, plus ONE new migration. Before deploying it:
 Without step 1 registration still works, but the WhatsApp number from sign-up is
 dropped and the user is asked for it again before entering a company.
 
+## Rollout: platform recycle bin (feature/platform-deletion)
+
+Deleting companies and accounts happens only in `/platform` (docs/deletion-spec.md):
+recycle bin for 30 days → permanent deletion on expiry or when forced (exact name or
+e-mail + authenticator code). A backup ZIP (CSV + PDF) can be downloaded first.
+
+1. Run `supabase/migrations/202610080001_platform_deletion.sql` ONCE as postgres.
+2. Run `supabase/tests/platform_deletion.sql`; it must print PASS. Its last line shows
+   `auth_users_update_allowed`: `true` means login blocking and e-mail release are
+   automatic; `false` means the app still blocks deleted accounts, but after a
+   permanent deletion the e-mail must be changed by hand in Supabase → Authentication
+   → Users before it can register again (the platform page reminds you).
+3. Run `supabase/operations/platform_deletion_retention.sql` as postgres and verify the
+   `jomsales-platform-recycle-bin` job is active (hourly, minute 15).
+4. Image files of a permanently deleted company are removed through the Storage API by
+   the platform page; expired companies show "图片文件待清理" with a cleanup button.
+
+Accounts are never deleted with a company. The platform owner account and any company's
+primary administrator cannot be deleted (transfer the primary role first).
+
 ## Rollout for the current installation
 
 The first FIVE migrations have already been applied. Do NOT rerun them.

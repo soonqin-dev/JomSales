@@ -51,11 +51,13 @@ export default function AccountPage() {
       const [members, profile, past] = await Promise.all([
         // companies(id) is null when the company is suspended/expired (RLS hides it).
         client.from("company_members").select("company_id,companies(id)").eq("user_id", user.id).eq("active", true),
-        client.from("account_profiles").select("display_name,whatsapp").eq("user_id", user.id).maybeSingle(),
+        client.from("account_profiles").select("display_name,whatsapp,deleted_at").eq("user_id", user.id).maybeSingle(),
         client.from("company_members").select("company_id").eq("user_id", user.id).limit(1)
       ]);
       if (members.error) throw members.error;
       if (version !== sequence.current) return;
+      // A deleted account is signed out even when Auth-level blocking is unavailable.
+      if (profile.data?.deleted_at) { await client.auth.signOut({ scope: "local" }); setState({ phase: "deleted" }); return; }
       if (!members.data?.length) { setState({ phase: "wait", user, formerMember: !past.error && !!past.data?.length }); return; }
       // Membership exists but every company is suspended or expired: never loop into /cloud.
       const usable = members.data.filter(m => m.companies);
@@ -79,6 +81,10 @@ export default function AccountPage() {
   if (state.phase === "error") return <main className="auth-main"><div className="auth-logo">JOM<br />SALES</div>
     <InlineError onRetry={() => { setState({ phase: "loading" }); void route(); }} retryLabel="重新读取">{state.error}</InlineError></main>;
   if (state.phase === "wait") return <WaitView state={state} onReload={() => { setState({ phase: "loading" }); void route(); }} />;
+  if (state.phase === "deleted") return <main className="auth-main"><div className="auth-logo">JOM<br />SALES</div>
+    <div className="stack"><h1 className="auth-title">这个账号已被删除</h1>
+      <p className="auth-sub">如有疑问，请联系 JomSales 负责人。账号在删除后 30 天内仍可由负责人恢复。</p>
+      <button type="button" className="btn btn-secondary btn-block" onClick={() => setState({ phase: "guest" })}>返回登录页面</button></div></main>;
 
   if (view === "verify") return <VerifyView key={reg.resent ? "again" : "first"} email={reg.submittedEmail} resent={reg.resent} onBack={() => setView("register-4")} onLogin={() => setView("login")} />;
   if (view.startsWith("register")) return <RegisterView step={Number(view.split("-")[1] || 1)} reg={reg} setReg={setReg} go={setView} invite={invite} />;
