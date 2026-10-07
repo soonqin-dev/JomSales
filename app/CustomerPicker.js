@@ -1,23 +1,56 @@
 "use client";
-import { useEffect,useRef,useState } from "react";
+// CPK｜选择客户 — daily-flow-spec §7. Only active, accessible customers are listed.
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "../lib/supabase/client";
 import { listCustomers } from "../lib/supabase/customers";
-export default function CustomerPicker({context,disabled,onSelect}) {
-  const [open,setOpen]=useState(false),[search,setSearch]=useState(""),[rows,setRows]=useState([]),[error,setError]=useState(""),[loading,setLoading]=useState(false),[offset,setOffset]=useState(0),[total,setTotal]=useState(0);
-  const sequence=useRef(0);
-  useEffect(()=>{
-    if(!open)return;
-    const version=++sequence.current;setLoading(true);setError("");setRows([]);
-    const timer=setTimeout(async()=>{try{const data=await listCustomers(createClient(),context.companyId,search,false,offset);if(version===sequence.current){setRows(data.items);setTotal(Number(data.total));}}
-      catch(err){if(version===sequence.current)setError(err.message);}finally{if(version===sequence.current)setLoading(false);}},250);
-    return()=>{++sequence.current;clearTimeout(timer);};
-  },[open,search,offset,context.companyId]);
-  return <div><button type="button" disabled={disabled} onClick={()=>setOpen(value=>!value)}>{open?"收起客户选择":"选择已保存客户"}</button>
-    {open && <div className="accountCard"><label>查询客户<input aria-label="选择客户查询" value={search} maxLength={120} disabled={disabled} onChange={e=>{setSearch(e.target.value);setOffset(0);}} /></label>
-      {loading&&<p role="status">正在查询客户…</p>}{error&&<p role="alert">{error}</p>}
-      {!loading&&!error&&!rows.length&&<p>没有客户，请手动填写或到客户通讯录新增。</p>}
-      {rows.map(row=><div className="teamRow" key={row.id}><div><strong>{row.name}</strong><p>{row.company} · {row.phone}</p>{context.role==='admin'&&<p>所属员工：{row.owner_name || row.owner_email || '姓名待补填'}</p>}</div><button type="button" disabled={disabled} onClick={()=>{onSelect(row);setOpen(false);}}>选用 {row.name}</button></div>)}
-      <div className="cloudButtons"><button type="button" disabled={disabled||loading||!offset} onClick={()=>setOffset(value=>Math.max(0,value-50))}>上一批客户</button><button type="button" disabled={disabled||loading||offset+50>=total} onClick={()=>setOffset(value=>value+50)}>下一批客户</button></div>
-    </div>}
-  </div>;
+import { EmptyState, InlineError, Pager, SearchBox, Sheet, SkeletonList } from "./ui";
+import Icon from "./icons";
+
+const PAGE = 50;
+
+export default function CustomerPicker({ context, onSelect, onClose }) {
+  const router = useRouter();
+  const [search, setSearch] = useState(""), [rows, setRows] = useState([]), [total, setTotal] = useState(0);
+  const [offset, setOffset] = useState(0), [loading, setLoading] = useState(true), [error, setError] = useState(""), [attempt, setAttempt] = useState(0);
+  const sequence = useRef(0);
+
+  useEffect(() => {
+    const version = ++sequence.current;
+    setLoading(true); setError("");
+    const timer = setTimeout(async () => {
+      try {
+        const data = await listCustomers(createClient(), context.companyId, search, false, offset);
+        if (version === sequence.current) { setRows(data.items); setTotal(Number(data.total)); }
+      } catch (err) { if (version === sequence.current) setError(`客户读取失败：${err.message}`); }
+      finally { if (version === sequence.current) setLoading(false); }
+    }, 250);
+    return () => { ++sequence.current; clearTimeout(timer); };
+  }, [search, offset, context.companyId, attempt]);
+
+  return (
+    <Sheet title="选择客户" subtitle="选用后会填入本张报价，之后可单独修改" onClose={onClose} footer={
+      <button type="button" className="text-btn" style={{ justifySelf: "center" }} onClick={() => { onClose(); router.push("/customers"); }}>
+        管理客户<Icon name="arrowRight" size={16} /></button>}>
+      <SearchBox value={search} onChange={value => { setSearch(value); setOffset(0); }} placeholder="搜索姓名、公司、电话" />
+      {error && <InlineError onRetry={() => setAttempt(value => value + 1)}>{error}</InlineError>}
+      {loading ? <SkeletonList count={4} height={56} /> : !rows.length ? (
+        <EmptyState icon="phone" title={search ? "没有符合的客户" : "还没有客户"} action={!search &&
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => { onClose(); router.push("/customers?new=1"); }}>去新增客户</button>} />
+      ) : (
+        <div className="list-card">
+          {rows.map(row => <button key={row.id} type="button" className="list-row" onClick={() => { onSelect(row); onClose(); }}>
+            <span className="list-text">
+              <span className="list-title" style={{ display: "block" }}>{row.name}</span>
+              <span className="list-desc" style={{ display: "block" }}>{[row.company, row.phone].filter(Boolean).join(" · ") || "—"}</span>
+              {context.role === "admin" && <span className="list-desc" style={{ display: "block" }}>建立者：{row.owner_name || row.owner_email || "—"}</span>}
+            </span>
+            <Icon name="chevronRight" size={18} />
+          </button>)}
+        </div>
+      )}
+      <Pager page={Math.floor(offset / PAGE)} hasMore={offset + PAGE < total} disabled={loading}
+        onPrev={() => setOffset(value => Math.max(0, value - PAGE))} onNext={() => setOffset(value => value + PAGE)} />
+    </Sheet>
+  );
 }

@@ -34,10 +34,19 @@ rather than creating another company.
 | `/account` | Register/login, resend email, create company, membership, logout | Public login screen |
 | `/auth/callback` | Finish email confirmation | Public callback |
 | `/join` | Email-bound employee invitation | Public entry, authenticated acceptance |
-| `/cloud` | Products, share cards, product CRUD, quotation editor | Active company member |
-| `/quotations` | Select/search quotes, status, trash/restore | Sales: own; admin: company-wide |
+| `/cloud` | Product catalog (CAT), detail sheet, share cards, product CRUD | Active company member |
+| `/cloud/quote` | Current quotation editor (QTE); download/share autosave | Active company member |
+| `/quotations` | Quote records, filters, status, recycle bin | Sales: own; admin: company-wide |
+| `/me` | Profile summary, admin shortcuts, company switch, logout | Active company member |
+| `/admin` | Company tools index | Company admin |
 | `/brand` | Company name, contact, Logo | Company admin |
 | `/team` | Invitations, disable/restore, grouped product permission | Company admin |
+
+Member pages live in the `app/(member)` route group (the folder name is not part
+of the URL). Its layout (`app/member-context.js`) verifies the company scope, holds
+the current quotation in page memory and renders the bottom navigation, so the
+draft survives switching pages and is lost only on a full reload. Visual rules:
+`docs/design-system.md`; page specs: `docs/daily-flow-spec.md`, `docs/pages-spec.md`.
 
 Server pages and proxy validate Auth using `getUser()`, never trusting a cookie's
 embedded user. Cookie refresh is forwarded to SSR and browser, including redirects.
