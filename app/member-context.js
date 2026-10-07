@@ -46,8 +46,11 @@ export default function MemberProvider({ children }) {
       if (version !== sequence.current) return;
       const rows = members.data || [];
       if (!rows.length) { scope.current = null; setContext(null); window.location.replace("/account"); return; }
+      // companies(...) is null for suspended/expired companies; those are not selectable.
+      const usable = rows.filter(m => m.companies);
+      if (!usable.length) { scope.current = null; setContext(null); window.location.replace("/account"); return; }
       const requested = chosen.current || new URLSearchParams(window.location.search).get("company");
-      const member = rows.find(m => m.company_id === requested) || (requested ? null : rows[0]);
+      const member = usable.find(m => m.company_id === requested) || (requested ? null : usable[0]);
       if (!member?.companies) { scope.current = null; setContext(null); throw new Error("公司访问权限不可用或已停用。请到「我的」切换公司，或联系公司管理员。"); }
       if (!completeCompanyProfile(profile.data)) {
         scope.current = null; setContext(null);
@@ -57,7 +60,7 @@ export default function MemberProvider({ children }) {
       const next = {
         userId: user.id, email: user.email || "", displayName: profile.data.display_name.trim(), whatsapp: profile.data.whatsapp || "",
         companyId: member.company_id, name: member.companies.name, role: member.role, is_primary: member.is_primary === true,
-        can_manage_products: member.can_manage_products === true, memberships: rows
+        can_manage_products: member.can_manage_products === true, memberships: usable
       };
       const prev = scope.current;
       const same = prev && JSON.stringify(prev) === JSON.stringify(next);

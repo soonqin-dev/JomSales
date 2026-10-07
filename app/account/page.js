@@ -49,14 +49,18 @@ export default function AccountPage() {
       // §2: invitation first, then company read (a failed read never shows AUTH.WAIT).
       if (pendingInvite()) { window.location.replace("/join"); return; }
       const [members, profile, past] = await Promise.all([
-        client.from("company_members").select("company_id").eq("user_id", user.id).eq("active", true),
+        // companies(id) is null when the company is suspended/expired (RLS hides it).
+        client.from("company_members").select("company_id,companies(id)").eq("user_id", user.id).eq("active", true),
         client.from("account_profiles").select("display_name,whatsapp").eq("user_id", user.id).maybeSingle(),
         client.from("company_members").select("company_id").eq("user_id", user.id).limit(1)
       ]);
       if (members.error) throw members.error;
       if (version !== sequence.current) return;
       if (!members.data?.length) { setState({ phase: "wait", user, formerMember: !past.error && !!past.data?.length }); return; }
-      if (!profile.error && !completeCompanyProfile(profile.data)) { window.location.replace(companyProfileSetupUrl(members.data[0].company_id, "/cloud")); return; }
+      // Membership exists but every company is suspended or expired: never loop into /cloud.
+      const usable = members.data.filter(m => m.companies);
+      if (!usable.length) { setState({ phase: "wait", user, suspended: true }); return; }
+      if (!profile.error && !completeCompanyProfile(profile.data)) { window.location.replace(companyProfileSetupUrl(usable[0].company_id, "/cloud")); return; }
       window.location.replace("/cloud");
     } catch (err) {
       if (version === sequence.current) setState(prev => ({ ...prev, phase: prev.phase === "loading" ? "error" : prev.phase, error: `无法读取账号资料：${err.message}` }));
@@ -268,11 +272,14 @@ function WaitView({ state, onReload }) {
       <div className="auth-logo" style={{ margin: "40px auto 32px" }}>JOM<br />SALES</div>
       <div className="stack">
         <div className="card row"><Icon name="userCircle" size={28} /><span className="grow ellipsis">{state.user.email}</span></div>
-        <div><h1 className="auth-title">等待公司邀请</h1>
-          <p className="auth-sub">{state.formerMember ? "你对原来公司的访问已停用。如有疑问，请联系公司管理员。" : "你的账号已创建。请让公司管理员给你发送邀请链接，打开链接即可加入公司。"}</p></div>
+        <div><h1 className="auth-title">{state.suspended ? "公司暂时无法使用" : "等待公司邀请"}</h1>
+          <p className="auth-sub">{state.suspended ? "你所在的公司目前已停用或服务已到期，资料都还保留。请联系 JomSales 负责人重新开通。"
+            : state.formerMember ? "你对原来公司的访问已停用。如有疑问，请联系公司管理员。" : "你的账号已创建。请让公司管理员给你发送邀请链接，打开链接即可加入公司。"}</p></div>
         <button type="button" className="btn btn-primary btn-block" disabled={busy} onClick={onReload}><Icon name="refresh" size={18} />重新读取</button>
         <Link href="/settings" className="btn btn-secondary btn-block">个人资料</Link>
         <button type="button" className="btn btn-danger btn-block" disabled={busy} onClick={logout}>退出登录</button>
+        {/* Platform owners must always reach /platform, even with no usable company. */}
+        <Link href="/platform" className="text-btn" style={{ justifySelf: "center" }}><Icon name="shield" size={16} />平台管理</Link>
       </div>
     </main>
   );

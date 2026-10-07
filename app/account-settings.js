@@ -129,7 +129,11 @@ export function SecurityPanel() {
       {platform && !account.factor && <InlineError>你是平台负责人，请先启用双重验证，才能进入平台后台。</InlineError>}
       <PasswordSection account={account} />
       <EmailSection account={account} />
-      <MfaSection account={account} toast={toast} />
+      <MfaSection account={account} toast={toast} onVerified={async () => {
+        // is_platform_admin needs an aal2 session, so it can only be confirmed after verifying.
+        try { const r = await createClient().rpc("is_platform_admin"); setPlatform(!r.error && r.data === true); } catch { /* link stays hidden */ }
+      }} />
+      {platform && account.factor && <Link href="/platform" className="btn btn-primary btn-block"><Icon name="shield" size={18} />进入平台后台</Link>}
     </div>
   );
 }
@@ -223,7 +227,7 @@ function EmailSection({ account }) {
   );
 }
 
-function MfaSection({ account, toast }) {
+function MfaSection({ account, toast, onVerified }) {
   const [enrollment, setEnrollment] = useState(null), [code, setCode] = useState("");
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   async function enroll() {
@@ -242,6 +246,7 @@ function MfaSection({ account, toast }) {
       setCode(""); setEnrollment(null);
       account.setState(prev => ({ ...prev, factor: { ...(prev.factor || {}), id: factorId } }));
       toast("双重验证已通过");
+      await onVerified?.();
     } catch (err) { setError(err.message); } finally { setBusy(false); }
   }
   async function copySecret() {

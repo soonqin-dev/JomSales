@@ -131,7 +131,7 @@ export default function Platform() {
     <>
       <header style={{ background: "var(--navy-ink)", color: "#fff" }}>
         <div className="row-between" style={{ width: "min(100%, 560px)", margin: "0 auto", padding: "14px 16px" }}>
-          <div className="row"><Link href="/me" className="circle-btn sm" style={{ background: "rgba(255,255,255,.15)" }} aria-label="返回"><Icon name="arrowLeft" size={18} /></Link>
+          <div className="row"><Link href="/account" className="circle-btn sm" style={{ background: "rgba(255,255,255,.15)" }} aria-label="返回"><Icon name="arrowLeft" size={18} /></Link>
             <div><p style={{ fontWeight: 700 }}>平台管理</p><p className="small" style={{ opacity: .7 }}>JomSales 平台负责人</p></div></div>
           <Icon name="shield" size={22} />
         </div>
@@ -144,7 +144,8 @@ export default function Platform() {
               <p className="card-title">无法进入平台后台</p>
               <p className="small muted">需要平台授权，并在「账号安全」完成双重验证。</p>
               <div className="btn-row"><button type="button" className="btn btn-secondary btn-sm" onClick={() => void load(0)}>重新检查</button>
-                <Link href="/me/security" className="btn btn-primary btn-sm">前往双重验证</Link></div>
+                {/* /settings works without any usable company (all companies may be suspended). */}
+                <Link href="/settings" className="btn btn-primary btn-sm">前往双重验证</Link></div>
             </div>
           ) : <>
             <form className="search-row" onSubmit={e => { e.preventDefault(); void load(0); }}>
